@@ -50,15 +50,37 @@ export async function deletePhotoFile(id: string) {
 }
 
 export async function makePhotoThumbnail(file: File): Promise<string> {
-  const bitmap = await createImageBitmap(file);
+  let source: CanvasImageSource;
+  let width: number;
+  let height: number;
+  let cleanup = () => {};
+  try {
+    const bitmap = await createImageBitmap(file);
+    source = bitmap;
+    width = bitmap.width;
+    height = bitmap.height;
+    cleanup = () => bitmap.close();
+  } catch {
+    const url = URL.createObjectURL(file);
+    const image = await new Promise<HTMLImageElement>((resolve, reject) => {
+      const element = new Image();
+      element.onload = () => resolve(element);
+      element.onerror = () => reject(new Error("Photo preview unavailable"));
+      element.src = url;
+    });
+    source = image;
+    width = image.naturalWidth;
+    height = image.naturalHeight;
+    cleanup = () => URL.revokeObjectURL(url);
+  }
   const maxEdge = 720;
-  const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
+  const scale = Math.min(1, maxEdge / Math.max(width, height));
   const canvas = document.createElement("canvas");
-  canvas.width = Math.max(1, Math.round(bitmap.width * scale));
-  canvas.height = Math.max(1, Math.round(bitmap.height * scale));
+  canvas.width = Math.max(1, Math.round(width * scale));
+  canvas.height = Math.max(1, Math.round(height * scale));
   const context = canvas.getContext("2d");
   if (!context) throw new Error("Photo preview unavailable");
-  context.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
-  bitmap.close();
+  context.drawImage(source, 0, 0, canvas.width, canvas.height);
+  cleanup();
   return canvas.toDataURL("image/jpeg", 0.68);
 }

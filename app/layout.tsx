@@ -23,18 +23,18 @@ export async function generateMetadata(): Promise<Metadata> {
   return {
     metadataBase,
     title: "Bulldogs Golf Day",
-    description: "Live team scoring, prize holes and day-of information for Denver Bulldogs Golf Day.",
+    description: "Live scoring, on-course fundraising, photos and clubhouse views for Denver Bulldogs Golf Day.",
     openGraph: {
       title: "Bulldogs Golf Day",
-      description: "Live scoring, prize holes and day-of info.",
+      description: "Live scoring, shop, photos and clubhouse views.",
       type: "website",
-      images: [{ url: "/og.png", width: 1733, height: 907, alt: "Denver Bulldogs Golf Day live scoring" }],
+      images: [{ url: "/og-v2.png", width: 1734, height: 907, alt: "Denver Bulldogs Golf Day app" }],
     },
     twitter: {
       card: "summary_large_image",
       title: "Bulldogs Golf Day",
-      description: "Live scoring, prize holes and day-of info.",
-      images: ["/og.png"],
+      description: "Live scoring, shop, photos and clubhouse views.",
+      images: ["/og-v2.png"],
     },
   };
 }

@@ -860,7 +860,7 @@ function ShopScreen({
             <button className="primary-button" disabled={selfTotal === 0 || checkingOut} onClick={checkout}>
               {checkingOut ? "Opening secure payment" : paymentReady ? `Pay $${selfTotal}` : "Payments not connected"}
             </button>
-            <p>Apple Pay or Google Pay when available. Card is the fallback. A receipt is sent by Stripe.</p>
+            <p>Apple Pay or Google Pay when available. Card is the fallback. Stripe collects an email for the receipt.</p>
           </div>
         </>
       ) : (
