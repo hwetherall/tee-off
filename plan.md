@@ -102,14 +102,16 @@ yardages reach a golfer.
 2. Team score entry, hole by hole
 3. Live ladder
 4. Prize hole claims, including the speed hole timer
-5. Volunteer selling mode with a running fundraising total
-6. Event info reference (schedule, address, what's included)
+5. Self-serve shop — players buy their own mulligans, string and raffle tickets
+6. Volunteer selling mode with a running fundraising total
+7. Photo gallery, uploaded from the course
+8. Clubhouse view — the big screen in the room
+9. Event info reference (schedule, address, what's included)
 
 ### Out
 
-Registration, payments processing, sponsor management, the draw, dinner
-seating, photo sharing. Anything that happens before 12:30 pm or after the
-awards.
+Registration, sponsor management, the draw, dinner seating. Anything that
+happens before 12:30 pm or after the awards.
 
 ### Deliberately not built
 
@@ -120,7 +122,13 @@ awards.
 
 ---
 
-## The five surfaces
+## The surfaces
+
+Six tabs on the phone: **Ladder · Card · Prizes · Shop · Photos · Info**.
+Six is the ceiling for a bottom bar — do not add a seventh, fold it into an
+existing tab instead.
+
+Plus one non-phone surface, the **Clubhouse view**, covered at the end.
 
 ### 1. Ladder
 
@@ -130,9 +138,6 @@ highlighted regardless of position.
 
 Sorting: score to par ascending, then holes completed descending (a team that
 is -4 through 12 sits above -4 through 10).
-
-Needs a separate **clubhouse view** — same data, large type, dark background,
-auto-refreshing, designed for a TV during the BBQ.
 
 ### 2. Card
 
@@ -160,19 +165,87 @@ handles the honesty problem better than a permissions model.
 The speed hole timer is the one screen a volunteer holds for four hours. Make
 start/stop enormous and make it survive a page refresh.
 
-### 4. Sell
+### 4. Shop
 
-Volunteer mode for Dan C and Marcus S on the roaming cart. Three products, tap
-to add, assign to a team, running total across the day. Cash and card handled
-outside the app for v1 — this is a tally, not a till.
+One tab, two modes, switched by a segmented control at the top.
 
-Shows the live 50/50 pot, because a visible growing number sells tickets.
+**Buy for my team** — the self-serve store. Quantity steppers on each product,
+a basket, and a single pay button. Apple Pay and Google Pay first, card as the
+fallback; nobody is typing a card number on a golf cart. This is real money
+moving, so it needs a payments provider (Stripe) and receipts.
 
-### 5. Info
+What happens after payment matters more than the payment itself:
+
+- **Mulligans** land straight in the team's counter on the Card tab
+- **String extender** creates a sealed envelope the player taps to open. Length
+  is randomised 6–24 inches at the moment of opening and then added to the
+  team's string balance. This mirrors the physical sealed envelope Jay is
+  selling, and the reveal is the single most enjoyable moment in the app —
+  build it properly, with the seal visibly closed until tapped.
+- **50/50 tickets** issue visible ticket numbers so people have something to
+  hold and check against the draw
+
+The important thing this unlocks: a group on hole 14 who wants a mulligan no
+longer waits for the cart to find them. Expect self-serve to overtake the
+roaming cart by mid-afternoon.
+
+**Volunteer sales** — the roaming cart tally for Dan C and Marcus S. Tap to
+log, cash and card handled outside the app. This is a tally, not a till.
+
+Both modes write to the same counts, so the fundraising total and the 50/50
+pot are one number regardless of how the sale happened. In the prototype the
+mode switch is an open toggle; in the real build it is gated to volunteer
+accounts.
+
+### 5. Photos
+
+Anyone can add, everyone can see. Camera-first: the add button opens the
+camera directly, multiple selection allowed, and uploads queue offline like
+scores do. Auto-caption with the team and the hole they're on, because nobody
+types a caption in a golf cart.
+
+Photos feed the clubhouse view during the BBQ, which is the actual reason this
+tab exists — a club that sees itself on the screen at dinner comes back next
+year.
+
+Needs a delete-my-own-photo path and a way for Jay to pull anything down. Keep
+moderation to that; a committee of volunteers is not going to review a queue.
+
+### 6. Info
 
 Schedule, address with a maps link, what registration includes, prize hole
 list, and Jay's phone number. Static. This is the screen that stops forty
 people texting the events chair.
+
+---
+
+### The Clubhouse view
+
+A separate 16:9 layout for the TV in the room. Not a responsive breakpoint of
+the phone app — a different screen with different content, sharing the same
+data. In the prototype it's a toggle above the device; in production it is its
+own URL the club opens on a laptop and casts.
+
+Four blocks:
+
+1. **The ladder** — top 10, large type, readable from the back of the room
+2. **The 50/50 pot** — the biggest number on the screen, updating live. A pot
+   people can watch grow sells more tickets than a volunteer asking does.
+3. **On the course** — all 18 holes across the bottom with team tags showing
+   who is where. Prize holes marked in red. This is the block that makes the
+   room point at the screen, and it's the one thing the paper system can never
+   do.
+4. **Hot hands / Gone missing** — the two teams lists nobody asked for and
+   everybody watches. Computed on the last three holes relative to par: best
+   three are hot, worst three have gone missing. Purely social, zero effect on
+   the result, and it gives the MC something to read out.
+
+Design constraints: dark background, no interaction, no scrolling, everything
+above the fold. Assume a 55-inch screen viewed from 20 feet and a laptop
+nobody will touch after 1 pm. Refresh on a timer, never require a click.
+
+During the BBQ, swap the course block for the photo gallery. That's a mode
+switch, not a redesign.
 
 ---
 
@@ -181,14 +254,25 @@ people texting the events chair.
 ```
 Event    { id, name, date, venue, format, startTime }
 Course   { id, name, par, holes: [{ number, par, yards }] }
-Team     { id, name, startHole, players: [Player], mulligans, stringInches }
+Team     { id, name, short, startHole, players: [Player], mulligans, stringInches }
 Player   { id, name, teamId }
 Score    { teamId, hole, strokes, enteredBy, enteredAt, synced }
 Claim    { contestId, holeNumber, playerName, teamId, mark, unit, claimedAt }
-Sale     { id, product, qty, amount, teamId, soldBy, soldAt, synced }
+Product  { id, name, price, description, active }
+Order    { id, teamId, buyerId, lines: [{productId, qty}], amount,
+           channel: 'self' | 'volunteer', paymentRef, createdAt, synced }
+Envelope { id, orderId, teamId, inches, openedAt }
+Ticket   { id, orderId, teamId, number }
+Photo    { id, teamId, uploaderId, url, hole, takenAt, synced }
 ```
 
-`Score` and `Sale` both carry a `synced` flag. That flag is the whole
+`short` on Team is the four-character tag used on the clubhouse course strip.
+
+Derived, never stored: ladder position, score to par, current hole
+(`(startHole - 1 + holesPlayed) mod 18 + 1`), last-three form, fundraising
+total, 50/50 pot. Recompute these; do not cache them into rows that can drift.
+
+`Score`, `Order` and `Photo` all carry a `synced` flag. That flag is the whole
 architecture — see below.
 
 ---
@@ -225,6 +309,16 @@ coverage will be patchy. Assume a group loses signal somewhere on the back nine.
 
 Build this from the first commit. Retrofitting offline onto a working online app
 is a rewrite, not a refactor.
+
+**Two exceptions to offline-first:**
+
+- **Payments must be online.** Do not queue a card charge. If there's no
+  signal, tell the player plainly — "No signal here. Try again near the
+  clubhouse, or flag down the cart" — and leave the basket intact. Never take
+  an order you can't charge for.
+- **Photos queue but don't block.** Upload the thumbnail immediately from local
+  storage, send the full file when signal returns, and never make someone wait
+  on a progress bar mid-round.
 
 **Everything else can be naive.** Polling every 20 seconds is fine for the
 ladder. Sixteen teams is not a scale problem.
@@ -277,14 +371,22 @@ Ship the ladder and score entry against Supabase with the offline queue. Teams
 loaded from a CSV Jay exports. Prize claims included. **This is the minimum
 that replaces paper.**
 
-### Phase 2 — Selling and clubhouse
+### Phase 2 — Clubhouse and volunteer sales
 
-Volunteer sell mode, the fundraising tally, and the TV leaderboard for the BBQ.
+The TV view and the volunteer tally. Neither needs payments, both are visible
+wins, and the clubhouse screen is what the committee will remember.
 
-### Phase 3 — Sharpen
+### Phase 3 — Self-serve shop
 
-Countback, edit history, speed hole timer hardening, a post-event summary the
-club can put in a newsletter.
+Stripe, the basket, the envelope reveal, ticket numbers. Last because it's the
+only piece that handles money and therefore the only piece that can go wrong
+expensively. **Do not ship this half-finished.** A broken checkout on the day
+costs the club more than not having one.
+
+### Phase 4 — Photos and polish
+
+Gallery, the BBQ slideshow, countback, edit history, and a post-event summary
+the club can put in a newsletter.
 
 If time runs out, Phase 1 alone is still a better day than a stack of pencils.
 
@@ -292,13 +394,23 @@ If time runs out, Phase 1 alone is still a better day than a stack of pencils.
 
 ## Open questions for Jay
 
+**Blocking the build**
+
 1. How many teams, and is it a full 18-group shotgun or are some holes doubled up?
 2. Gross scores only, or is there a handicap adjustment on team scores?
-3. Beat the Pro — price, which hole, and does it feed the ladder or sit separate?
-4. Speed hole — fastest team time wins outright, or is there a stroke penalty component?
-5. Is the 50/50 drawn at the BBQ, and does the app need to do the draw?
-6. Can we get the official Applewood scorecard (pars and yardages) before Saturday?
-7. Who is the 4th in Group 2?
+3. Can we get the official Applewood scorecard (pars and yardages) before Saturday?
+4. Does the club have a Stripe account, or do we route self-serve payments
+   through something that already exists? This decides whether the shop is
+   possible at all this year.
+
+**Nice to resolve**
+
+5. Beat the Pro — price, which hole, and does it feed the ladder or sit separate?
+6. Speed hole — fastest team time wins outright, or is there a stroke penalty component?
+7. Is the 50/50 drawn at the BBQ, and does the app need to do the draw?
+8. Who owns the photos, and is anyone uncomfortable being on the screen at dinner?
+9. Is there a TV in the room at Applewood, and can we plug a laptop into it?
+10. Who is the 4th in Group 2?
 
 ---
 

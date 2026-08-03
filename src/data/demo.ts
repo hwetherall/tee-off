@@ -7,6 +7,7 @@ export type Player = {
 export type Team = {
   id: string;
   name: string;
+  short: string;
   code: string;
   startHole: number;
   players: Player[];
@@ -42,16 +43,51 @@ export type Claim = {
   synced: boolean;
 };
 
-export type Sale = {
-  id: string;
-  product: "mulligan" | "string" | "raffle";
+export type OrderLine = {
+  productId: "mulligan" | "string" | "raffle";
   qty: number;
-  amount: number;
+};
+
+export type Order = {
+  id: string;
   teamId: string;
-  soldBy: string;
-  soldAt: string;
+  buyerId: string;
+  lines: OrderLine[];
+  amount: number;
+  channel: "self" | "volunteer";
+  paymentRef: string | null;
+  createdAt: string;
   synced: boolean;
-  stringInches?: number;
+};
+
+export type Envelope = {
+  id: string;
+  orderId: string;
+  teamId: string;
+  inches: number | null;
+  openedAt: string | null;
+  synced: boolean;
+};
+
+export type Ticket = {
+  id: string;
+  orderId: string;
+  teamId: string;
+  number: string;
+  synced: boolean;
+};
+
+export type Photo = {
+  id: string;
+  teamId: string;
+  uploaderId: string;
+  url: string | null;
+  thumbnail: string;
+  storagePath: string | null;
+  hole: number;
+  takenAt: string;
+  synced: boolean;
+  mine: boolean;
 };
 
 export const EVENT = {
@@ -100,6 +136,7 @@ export const DEMO_TEAMS: Team[] = [
   {
     id: "team-1",
     name: "Group 1",
+    short: "G01",
     code: "1842",
     // ASSUMPTION: Starting holes and access codes have not been supplied.
     startHole: 1,
@@ -110,6 +147,7 @@ export const DEMO_TEAMS: Team[] = [
   {
     id: "team-2",
     name: "Group 2",
+    short: "G02",
     code: "2715",
     // ASSUMPTION: Starting holes and access codes have not been supplied.
     startHole: 3,
@@ -118,14 +156,14 @@ export const DEMO_TEAMS: Team[] = [
     stringInches: 12,
   },
   // ASSUMPTION: Groups 3–10 are demo-only placeholders until the full draw arrives.
-  { id: "team-3", name: "Group 3", code: "3168", startHole: 5, players: players("team-3", ["Golfer 3A", "Golfer 3B", "Golfer 3C", "Golfer 3D"]), mulligans: 2, stringInches: 20 },
-  { id: "team-4", name: "Group 4", code: "4093", startHole: 7, players: players("team-4", ["Golfer 4A", "Golfer 4B", "Golfer 4C", "Golfer 4D"]), mulligans: 0, stringInches: 0 },
-  { id: "team-5", name: "Group 5", code: "5581", startHole: 9, players: players("team-5", ["Golfer 5A", "Golfer 5B", "Golfer 5C", "Golfer 5D"]), mulligans: 3, stringInches: 24 },
-  { id: "team-6", name: "Group 6", code: "6027", startHole: 11, players: players("team-6", ["Golfer 6A", "Golfer 6B", "Golfer 6C", "Golfer 6D"]), mulligans: 1, stringInches: 8 },
-  { id: "team-7", name: "Group 7", code: "7344", startHole: 13, players: players("team-7", ["Golfer 7A", "Golfer 7B", "Golfer 7C", "Golfer 7D"]), mulligans: 2, stringInches: 14 },
-  { id: "team-8", name: "Group 8", code: "8621", startHole: 15, players: players("team-8", ["Golfer 8A", "Golfer 8B", "Golfer 8C", "Golfer 8D"]), mulligans: 0, stringInches: 22 },
-  { id: "team-9", name: "Group 9", code: "9450", startHole: 17, players: players("team-9", ["Golfer 9A", "Golfer 9B", "Golfer 9C", "Golfer 9D"]), mulligans: 1, stringInches: 6 },
-  { id: "team-10", name: "Group 10", code: "1076", startHole: 18, players: players("team-10", ["Golfer 10A", "Golfer 10B", "Golfer 10C", "Golfer 10D"]), mulligans: 2, stringInches: 16 },
+  { id: "team-3", name: "Group 3", short: "G03", code: "3168", startHole: 5, players: players("team-3", ["Golfer 3A", "Golfer 3B", "Golfer 3C", "Golfer 3D"]), mulligans: 2, stringInches: 20 },
+  { id: "team-4", name: "Group 4", short: "G04", code: "4093", startHole: 7, players: players("team-4", ["Golfer 4A", "Golfer 4B", "Golfer 4C", "Golfer 4D"]), mulligans: 0, stringInches: 0 },
+  { id: "team-5", name: "Group 5", short: "G05", code: "5581", startHole: 9, players: players("team-5", ["Golfer 5A", "Golfer 5B", "Golfer 5C", "Golfer 5D"]), mulligans: 3, stringInches: 24 },
+  { id: "team-6", name: "Group 6", short: "G06", code: "6027", startHole: 11, players: players("team-6", ["Golfer 6A", "Golfer 6B", "Golfer 6C", "Golfer 6D"]), mulligans: 1, stringInches: 8 },
+  { id: "team-7", name: "Group 7", short: "G07", code: "7344", startHole: 13, players: players("team-7", ["Golfer 7A", "Golfer 7B", "Golfer 7C", "Golfer 7D"]), mulligans: 2, stringInches: 14 },
+  { id: "team-8", name: "Group 8", short: "G08", code: "8621", startHole: 15, players: players("team-8", ["Golfer 8A", "Golfer 8B", "Golfer 8C", "Golfer 8D"]), mulligans: 0, stringInches: 22 },
+  { id: "team-9", name: "Group 9", short: "G09", code: "9450", startHole: 17, players: players("team-9", ["Golfer 9A", "Golfer 9B", "Golfer 9C", "Golfer 9D"]), mulligans: 1, stringInches: 6 },
+  { id: "team-10", name: "Group 10", short: "G10", code: "1076", startHole: 18, players: players("team-10", ["Golfer 10A", "Golfer 10B", "Golfer 10C", "Golfer 10D"]), mulligans: 2, stringInches: 16 },
 ];
 
 function seedScores(teamId: string, startHole: number, offsets: number[]): Score[] {
@@ -144,7 +182,7 @@ function seedScores(teamId: string, startHole: number, offsets: number[]): Score
   });
 }
 
-// ASSUMPTION: All scores, claims and sales below exist only to make the demo move.
+// ASSUMPTION: All scores, claims and orders below exist only to make the demo move.
 export const DEMO_SCORES: Score[] = [
   ...seedScores("team-1", 1, [-1, 0, -1, 0, -1, 0]),
   ...seedScores("team-2", 3, [0, -1, 0, -1, -1, 0]),
@@ -165,11 +203,23 @@ export const DEMO_CLAIMS: Claim[] = [
   { id: "claim-putt", contestId: "putt", holeNumber: 18, playerName: "Rich Mann", teamId: "team-1", mark: 18, unit: "ft", claimedAt: "demo", synced: true },
 ];
 
-export const DEMO_SALES: Sale[] = [
-  { id: "sale-1", product: "mulligan", qty: 3, amount: 30, teamId: "team-3", soldBy: "Dan C", soldAt: "demo", synced: true },
-  { id: "sale-2", product: "raffle", qty: 5, amount: 100, teamId: "team-5", soldBy: "Marcus S", soldAt: "demo", synced: true },
-  { id: "sale-3", product: "string", qty: 1, amount: 20, teamId: "team-7", soldBy: "Dan C", soldAt: "demo", synced: true, stringInches: 14 },
+export const DEMO_ORDERS: Order[] = [
+  { id: "order-1", teamId: "team-3", buyerId: "Dan C", lines: [{ productId: "mulligan", qty: 3 }], amount: 30, channel: "volunteer", paymentRef: null, createdAt: "demo", synced: true },
+  { id: "order-2", teamId: "team-5", buyerId: "Marcus S", lines: [{ productId: "raffle", qty: 5 }], amount: 100, channel: "volunteer", paymentRef: null, createdAt: "demo", synced: true },
+  { id: "order-3", teamId: "team-7", buyerId: "Dan C", lines: [{ productId: "string", qty: 1 }], amount: 20, channel: "volunteer", paymentRef: null, createdAt: "demo", synced: true },
 ];
+
+export const DEMO_ENVELOPES: Envelope[] = [
+  { id: "envelope-order-3-1", orderId: "order-3", teamId: "team-7", inches: 14, openedAt: "demo", synced: true },
+];
+
+export const DEMO_TICKETS: Ticket[] = Array.from({ length: 5 }, (_, index) => ({
+  id: `ticket-order-2-${index + 1}`,
+  orderId: "order-2",
+  teamId: "team-5",
+  number: `DB-0050${index + 1}`,
+  synced: true,
+}));
 
 export const SCHEDULE = [
   ["12:00 pm", "Volunteers arrive"],
