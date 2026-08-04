@@ -22,6 +22,7 @@ import {
   RotateCcw,
   ShoppingBag,
   ShieldCheck,
+  Smartphone,
   Trash2,
   Trophy,
   Tv,
@@ -200,6 +201,43 @@ function SectionHeader({ eyebrow, title, action }: { eyebrow: string; title: str
   );
 }
 
+function ViewModeToggle({
+  active,
+  onPhone,
+  onTv,
+  tone = "light",
+}: {
+  active: "phone" | "tv";
+  onPhone: () => void;
+  onTv: () => void;
+  tone?: "light" | "dark";
+}) {
+  return (
+    <div className={`view-mode view-mode-${tone}`} role="tablist" aria-label="View mode">
+      <button
+        type="button"
+        role="tab"
+        className={active === "phone" ? "active" : ""}
+        aria-selected={active === "phone"}
+        onClick={onPhone}
+      >
+        <Smartphone size={16} />
+        <span>Phone</span>
+      </button>
+      <button
+        type="button"
+        role="tab"
+        className={active === "tv" ? "active" : ""}
+        aria-selected={active === "tv"}
+        onClick={onTv}
+      >
+        <Tv size={16} />
+        <span>TV</span>
+      </button>
+    </div>
+  );
+}
+
 function LadderRow({
   item,
   own = false,
@@ -240,9 +278,11 @@ function LadderScreen({
         eyebrow="Live ladder"
         title="Round standings"
         action={
-          <button className="icon-action" onClick={onClubhouse} aria-label="Open clubhouse view">
-            <Tv size={23} />
-          </button>
+          <ViewModeToggle
+            active="phone"
+            onPhone={() => undefined}
+            onTv={onClubhouse}
+          />
         }
       />
       <div className="own-rank-card">
@@ -1053,7 +1093,15 @@ function lastThreeForm(team: Team, scores: Score[]) {
   return lastThree.reduce((total, score) => total + score.strokes - COURSE.holes[score.hole - 1].par, 0);
 }
 
-function ClubhouseView({ state, mode }: { state: AppState; mode: "course" | "bbq" }) {
+function ClubhouseView({
+  state,
+  mode,
+  onClose,
+}: {
+  state: AppState;
+  mode: "course" | "bbq";
+  onClose: () => void;
+}) {
   const ranked = rankTeams(state.teams, state.scores);
   const raffleTotal = state.orders.reduce((sum, order) => sum + orderQuantity(order, "raffle") * 20, 0);
   const form = state.teams
@@ -1074,7 +1122,16 @@ function ClubhouseView({ state, mode }: { state: AppState; mode: "course" | "bbq
     <main className={`clubhouse-view clubhouse-dashboard mode-${mode}`}>
       <header>
         <div className="clubhouse-brand"><BrandMark /><div><span>Denver Bulldogs</span><h1>{mode === "bbq" ? "Golf Day · BBQ" : "Golf Day · On Course"}</h1></div></div>
-        <div className="clubhouse-meta"><span><i /> Live</span><strong>{clock}</strong></div>
+        <div className="clubhouse-meta">
+          <span><i /> Live</span>
+          <strong>{clock}</strong>
+          <ViewModeToggle
+            active="tv"
+            tone="dark"
+            onPhone={onClose}
+            onTv={() => undefined}
+          />
+        </div>
       </header>
       <div className="clubhouse-top-grid">
         <section className="clubhouse-board">
@@ -1300,18 +1357,19 @@ export default function GolfDayApp() {
     setClubhouseMode(mode);
   };
 
-  if (clubhouseMode) return <ClubhouseView state={state} mode={clubhouseMode} />;
+  const closeClubhouse = () => {
+    const url = new URL(window.location.href);
+    url.search = "";
+    window.history.pushState({}, "", url);
+    setClubhouseMode(null);
+  };
+
+  if (clubhouseMode) {
+    return <ClubhouseView state={state} mode={clubhouseMode} onClose={closeClubhouse} />;
+  }
 
   return (
     <div className="site-stage">
-      <div className="desktop-event-panel" aria-hidden="true">
-        <BrandMark />
-        <span>Denver Bulldogs</span>
-        <h2>Golf Day</h2>
-        <p>{EVENT.date}<br />{EVENT.venue}</p>
-        <div className="desktop-score"><small>Shotgun start</small><strong>1:30</strong><span>pm</span></div>
-        <div className="desktop-stripe" />
-      </div>
       <main className="app-shell">
         <header className="app-header">
           <div className="app-brand"><BrandMark compact /><div><span>Denver Bulldogs</span><strong>Golf Day</strong></div></div>
