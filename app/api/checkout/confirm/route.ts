@@ -1,13 +1,6 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-
-function ticketPrefix(sessionId: string) {
-  let hash = 0;
-  for (let index = 0; index < sessionId.length; index += 1) {
-    hash = ((hash << 5) - hash + sessionId.charCodeAt(index)) | 0;
-  }
-  return Math.abs(hash).toString(36).toUpperCase().padStart(6, "0").slice(-6);
-}
+import { checkoutTotalCents, parseCheckoutLines, ticketPrefix } from "@/src/lib/shop";
 
 export async function GET(request: Request) {
   const secret = process.env.STRIPE_SECRET_KEY;
@@ -22,10 +15,16 @@ export async function GET(request: Request) {
     return NextResponse.json({ error: "Payment has not completed." }, { status: 409 });
   }
 
-  const lines = JSON.parse(session.metadata?.lines ?? "[]") as Array<{
-    productId: "mulligan" | "string" | "raffle";
-    qty: number;
-  }>;
+  const lines = parseCheckoutLines(session.metadata?.lines);
+  if (
+    !lines
+    || !session.metadata?.team_id
+    || !session.metadata?.buyer_id
+    || session.currency !== "usd"
+    || session.amount_total !== checkoutTotalCents(lines)
+  ) {
+    return NextResponse.json({ error: "Payment details are invalid." }, { status: 422 });
+  }
   const raffleQty = lines.find((line) => line.productId === "raffle")?.qty ?? 0;
   const stringQty = lines.find((line) => line.productId === "string")?.qty ?? 0;
   const prefix = ticketPrefix(session.id);

@@ -41,6 +41,14 @@ create table if not exists public.teams (
   string_inches smallint not null default 0 check (string_inches >= 0)
 );
 
+-- Minimal roster so Stripe fulfillment can resolve team_ids. Richer day-of
+-- dummy rows (scores, claims, orders, …) live in supabase/seed.sql.
+-- Access codes (app-side only): team-1 = 1842, team-2 = 2715
+insert into public.teams (id, name, short, start_hole, mulligans, string_inches) values
+  ('team-1', 'Group 1', 'G01', 1, 2, 18),
+  ('team-2', 'Group 2', 'G02', 3, 1, 12)
+on conflict (id) do nothing;
+
 create table if not exists public.orders (
   id text primary key,
   team_id text not null,
@@ -51,6 +59,10 @@ create table if not exists public.orders (
   payment_ref text,
   created_at timestamptz not null default now()
 );
+
+create unique index if not exists orders_payment_ref_unique
+on public.orders (payment_ref)
+where payment_ref is not null;
 
 create table if not exists public.envelopes (
   id text primary key,
@@ -118,3 +130,88 @@ on conflict (id) do update set public = true;
 drop policy if exists "day-of photo files" on storage.objects;
 create policy "day-of photo files" on storage.objects
 for all to anon using (bucket_id = 'photos') with check (bucket_id = 'photos');
+
+-- Stripe fulfillment is a single transaction: either the paid order and all of
+-- its entitlements are recorded once, or none of them are. Only a server-side
+-- Supabase secret/service-role key may call this function.
+create or replace function public.fulfill_stripe_checkout(
+  p_order_id text,
+  p_team_id text,
+  p_buyer_id text,
+  p_lines jsonb,
+  p_amount numeric,
+  p_payment_ref text,
+  p_created_at timestamptz,
+  p_mulligan_qty integer,
+  p_envelope_ids jsonb,
+  p_tickets jsonb
+)
+returns boolean
+language plpgsql
+security definer
+set search_path = ''
+as $$
+declare
+  inserted_count integer;
+  existing_payment_ref text;
+begin
+  if p_order_id = '' or p_team_id = '' or p_buyer_id = '' or p_payment_ref = '' then
+    raise exception 'Stripe fulfillment identifiers are required';
+  end if;
+  if p_amount < 0 or p_mulligan_qty < 0 or p_mulligan_qty > 20 then
+    raise exception 'Stripe fulfillment values are invalid';
+  end if;
+  if jsonb_typeof(p_lines) <> 'array'
+    or jsonb_typeof(p_envelope_ids) <> 'array'
+    or jsonb_typeof(p_tickets) <> 'array' then
+    raise exception 'Stripe fulfillment collections must be arrays';
+  end if;
+
+  perform 1 from public.teams where id = p_team_id;
+  if not found then
+    raise exception 'Unknown team for Stripe fulfillment';
+  end if;
+
+  insert into public.orders (
+    id, team_id, buyer_id, lines, amount, channel, payment_ref, created_at
+  ) values (
+    p_order_id, p_team_id, p_buyer_id, p_lines, p_amount, 'self', p_payment_ref, p_created_at
+  )
+  on conflict do nothing;
+  get diagnostics inserted_count = row_count;
+
+  if inserted_count = 0 then
+    select payment_ref into existing_payment_ref
+    from public.orders
+    where id = p_order_id;
+
+    if not found or existing_payment_ref is distinct from p_payment_ref then
+      raise exception 'Stripe payment reference conflicts with an existing order';
+    end if;
+    return false;
+  end if;
+
+  insert into public.envelopes (id, order_id, team_id, inches, opened_at)
+  select value, p_order_id, p_team_id, null, null
+  from jsonb_array_elements_text(p_envelope_ids);
+
+  insert into public.tickets (id, order_id, team_id, number)
+  select ticket.id, p_order_id, p_team_id, ticket.number
+  from jsonb_to_recordset(p_tickets) as ticket(id text, number text);
+
+  update public.teams
+  set mulligans = mulligans + p_mulligan_qty
+  where id = p_team_id;
+
+  return true;
+end;
+$$;
+
+revoke all on function public.fulfill_stripe_checkout(
+  text, text, text, jsonb, numeric, text, timestamptz, integer, jsonb, jsonb
+) from public, anon, authenticated;
+grant execute on function public.fulfill_stripe_checkout(
+  text, text, text, jsonb, numeric, text, timestamptz, integer, jsonb, jsonb
+) to service_role;
+
+notify pgrst, 'reload schema';

@@ -1,30 +1,26 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-
-const CATALOG = {
-  mulligan: { name: "Mulligan", description: "One re-hit for your team", unitAmount: 1000 },
-  string: { name: "String extender", description: "One sealed 6–24 inch digital envelope", unitAmount: 2000 },
-  raffle: { name: "50/50 raffle ticket", description: "Half the pot goes to the winner", unitAmount: 2000 },
-} as const;
-
-type ProductId = keyof typeof CATALOG;
+import { CATALOG, validateCheckoutLines } from "@/src/lib/shop";
 
 export async function POST(request: Request) {
   const secret = process.env.STRIPE_SECRET_KEY;
-  if (!secret) {
+  if (!secret || process.env.NEXT_PUBLIC_SHOP_ENABLED !== "true") {
     return NextResponse.json({ error: "Payments are not connected yet." }, { status: 503 });
   }
 
-  const payload = await request.json() as {
+  let payload: {
     teamId?: string;
     buyerId?: string;
-    lines?: Array<{ productId?: string; qty?: number }>;
+    lines?: unknown;
   };
-  const lines = (payload.lines ?? []).filter((line): line is { productId: ProductId; qty: number } =>
-    typeof line.productId === "string" && line.productId in CATALOG
-      && Number.isInteger(line.qty) && Number(line.qty) > 0 && Number(line.qty) <= 20,
-  );
-  if (!payload.teamId || !payload.buyerId || lines.length === 0) {
+  try {
+    payload = await request.json();
+  } catch {
+    return NextResponse.json({ error: "The basket is not valid." }, { status: 400 });
+  }
+
+  const lines = validateCheckoutLines(payload.lines);
+  if (!payload.teamId || !payload.buyerId || !lines) {
     return NextResponse.json({ error: "The basket is not valid." }, { status: 400 });
   }
 
