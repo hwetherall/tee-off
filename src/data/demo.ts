@@ -1,3 +1,5 @@
+import { GOLFER_ROSTER, TEAM_CONFIGURATION } from "@/src/data/roster";
+
 export type Player = {
   id: string;
   name: string;
@@ -128,98 +130,33 @@ export const COURSE = {
   ] satisfies Hole[],
 } as const;
 
-function players(teamId: string, names: string[]): Player[] {
-  return names.map((name, index) => ({ id: `${teamId}-p${index + 1}`, name, teamId }));
-}
-
-export const DEMO_TEAMS: Team[] = [
-  {
-    id: "team-1",
-    name: "Group 1",
-    short: "G01",
-    code: "1842",
-    // ASSUMPTION: Starting holes and access codes have not been supplied.
-    startHole: 1,
-    players: players("team-1", ["Rich Mann", "Steve Noble", "Russell Waugh", "Dan Kerwin"]),
-    mulligans: 2,
-    stringInches: 18,
-  },
-  {
-    id: "team-2",
-    name: "Group 2",
-    short: "G02",
-    code: "2715",
-    // ASSUMPTION: Starting holes and access codes have not been supplied.
-    startHole: 3,
-    players: players("team-2", ["Mitch Holland", "Drew Wolfe", "Matt Moore", "4th TBD"]),
-    mulligans: 1,
-    stringInches: 12,
-  },
-  // ASSUMPTION: Groups 3–10 are demo-only placeholders until the full draw arrives.
-  { id: "team-3", name: "Group 3", short: "G03", code: "3168", startHole: 5, players: players("team-3", ["Golfer 3A", "Golfer 3B", "Golfer 3C", "Golfer 3D"]), mulligans: 2, stringInches: 20 },
-  { id: "team-4", name: "Group 4", short: "G04", code: "4093", startHole: 7, players: players("team-4", ["Golfer 4A", "Golfer 4B", "Golfer 4C", "Golfer 4D"]), mulligans: 0, stringInches: 0 },
-  { id: "team-5", name: "Group 5", short: "G05", code: "5581", startHole: 9, players: players("team-5", ["Golfer 5A", "Golfer 5B", "Golfer 5C", "Golfer 5D"]), mulligans: 3, stringInches: 24 },
-  { id: "team-6", name: "Group 6", short: "G06", code: "6027", startHole: 11, players: players("team-6", ["Golfer 6A", "Golfer 6B", "Golfer 6C", "Golfer 6D"]), mulligans: 1, stringInches: 8 },
-  { id: "team-7", name: "Group 7", short: "G07", code: "7344", startHole: 13, players: players("team-7", ["Golfer 7A", "Golfer 7B", "Golfer 7C", "Golfer 7D"]), mulligans: 2, stringInches: 14 },
-  { id: "team-8", name: "Group 8", short: "G08", code: "8621", startHole: 15, players: players("team-8", ["Golfer 8A", "Golfer 8B", "Golfer 8C", "Golfer 8D"]), mulligans: 0, stringInches: 22 },
-  { id: "team-9", name: "Group 9", short: "G09", code: "9450", startHole: 17, players: players("team-9", ["Golfer 9A", "Golfer 9B", "Golfer 9C", "Golfer 9D"]), mulligans: 1, stringInches: 6 },
-  { id: "team-10", name: "Group 10", short: "G10", code: "1076", startHole: 18, players: players("team-10", ["Golfer 10A", "Golfer 10B", "Golfer 10C", "Golfer 10D"]), mulligans: 2, stringInches: 16 },
-];
-
-function seedScores(teamId: string, startHole: number, offsets: number[]): Score[] {
-  return offsets.map((offset, index) => {
-    const hole = ((startHole - 1 + index) % 18) + 1;
-    const par = COURSE.holes[hole - 1].par;
-    return {
-      id: `${teamId}-h${hole}`,
+export const INITIAL_TEAMS: Team[] = TEAM_CONFIGURATION.map((team) => {
+  const teamId = `team-${team.group}`;
+  const players = GOLFER_ROSTER
+    .filter((golfer) => golfer.group === team.group)
+    .map((golfer) => ({
+      id: `${teamId}-p${golfer.position}`,
+      name: `${golfer.firstName} ${golfer.lastName}`,
       teamId,
-      hole,
-      strokes: par + offset,
-      enteredBy: "demo",
-      enteredAt: "demo",
-      synced: true,
-    };
-  });
-}
+    }));
 
-// ASSUMPTION: All scores, claims and orders below exist only to make the demo move.
-export const DEMO_SCORES: Score[] = [
-  ...seedScores("team-1", 1, [-1, 0, -1, 0, -1, 0]),
-  ...seedScores("team-2", 3, [0, -1, 0, -1, -1, 0]),
-  ...seedScores("team-3", 5, [-1, -1, 0, 0, -1, 0, -1]),
-  ...seedScores("team-4", 7, [0, 0, -1, 0, 0]),
-  ...seedScores("team-5", 9, [-1, 0, -1, -1, 0, -1]),
-  ...seedScores("team-6", 11, [0, -1, 0, -1, 0, 0]),
-  ...seedScores("team-7", 13, [-1, -1, -1, 0, -1]),
-  ...seedScores("team-8", 15, [0, 0, -1, 0, 0, -1]),
-  ...seedScores("team-9", 17, [-1, 0, -1, 0, -1]),
-  ...seedScores("team-10", 18, [0, -1, 0, -1, -1, 0]),
-];
+  return {
+    id: teamId,
+    name: `Group ${team.group}`,
+    short: `G${String(team.group).padStart(2, "0")}`,
+    code: team.code,
+    startHole: team.startHole,
+    players,
+    mulligans: 0,
+    stringInches: 0,
+  };
+});
 
-export const DEMO_CLAIMS: Claim[] = [
-  { id: "claim-closest", contestId: "closest", holeNumber: 2, playerName: "Steve Noble", teamId: "team-1", mark: 62, unit: "in", claimedAt: "demo", synced: true },
-  { id: "claim-speed", contestId: "speed", holeNumber: 12, playerName: "Group 2", teamId: "team-2", mark: 276.4, unit: "sec", claimedAt: "demo", synced: true },
-  { id: "claim-drive", contestId: "drive", holeNumber: 15, playerName: "Mitch Holland", teamId: "team-2", mark: 264, unit: "yd", claimedAt: "demo", synced: true },
-  { id: "claim-putt", contestId: "putt", holeNumber: 18, playerName: "Rich Mann", teamId: "team-1", mark: 18, unit: "ft", claimedAt: "demo", synced: true },
-];
-
-export const DEMO_ORDERS: Order[] = [
-  { id: "order-1", teamId: "team-3", buyerId: "Dan C", lines: [{ productId: "mulligan", qty: 3 }], amount: 30, channel: "volunteer", paymentRef: null, createdAt: "demo", synced: true },
-  { id: "order-2", teamId: "team-5", buyerId: "Marcus S", lines: [{ productId: "raffle", qty: 5 }], amount: 100, channel: "volunteer", paymentRef: null, createdAt: "demo", synced: true },
-  { id: "order-3", teamId: "team-7", buyerId: "Dan C", lines: [{ productId: "string", qty: 1 }], amount: 20, channel: "volunteer", paymentRef: null, createdAt: "demo", synced: true },
-];
-
-export const DEMO_ENVELOPES: Envelope[] = [
-  { id: "envelope-order-3-1", orderId: "order-3", teamId: "team-7", inches: 14, openedAt: "demo", synced: true },
-];
-
-export const DEMO_TICKETS: Ticket[] = Array.from({ length: 5 }, (_, index) => ({
-  id: `ticket-order-2-${index + 1}`,
-  orderId: "order-2",
-  teamId: "team-5",
-  number: `DB-0050${index + 1}`,
-  synced: true,
-}));
+export const INITIAL_SCORES: Score[] = [];
+export const INITIAL_CLAIMS: Claim[] = [];
+export const INITIAL_ORDERS: Order[] = [];
+export const INITIAL_ENVELOPES: Envelope[] = [];
+export const INITIAL_TICKETS: Ticket[] = [];
 
 export const SCHEDULE = [
   ["12:00 pm", "Volunteers arrive"],

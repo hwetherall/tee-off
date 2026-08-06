@@ -91,6 +91,20 @@ actions tied to the current ChatGPT user. Leave public content anonymous.
 - `npm run build`: verify the vinext build output
 - `npm test`: build the starter and verify its rendered loading skeleton
 - `npm run db:generate`: generate Drizzle migrations after schema changes
+- `npm run roster:parse -- "V2 Golfers - Denver Bulldogs Group Aug 8.xlsx"`: validate the Aug 8 workbook without changing Supabase
+- `npm run roster:apply -- "V2 Golfers - Denver Bulldogs Group Aug 8.xlsx"`: sync the validated roster to Supabase after applying `supabase/roster.sql`
+
+## Golf roster
+
+The authoritative Aug 8 roster is stored in `public.players`, with each row
+linked to `public.teams`. For a new or existing Supabase project:
+
+1. Apply `supabase/schema.sql`.
+2. Apply `supabase/roster.sql` once to create and load the 8-group roster.
+3. Use `npm run roster:apply -- <workbook.xlsx>` for later workbook corrections.
+
+The workbook contains golfer names and group membership only. Starting holes
+and four-digit cart-card codes remain the existing Group 1-8 configuration.
 
 ## Learn More
 

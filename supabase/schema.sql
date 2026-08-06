@@ -36,18 +36,38 @@ create table if not exists public.teams (
   id text primary key,
   name text not null,
   short text not null,
+  access_code text not null,
   start_hole smallint not null check (start_hole between 1 and 18),
   mulligans smallint not null default 0 check (mulligans >= 0),
   string_inches smallint not null default 0 check (string_inches >= 0)
 );
 
--- Minimal roster so Stripe fulfillment can resolve team_ids. Richer day-of
--- dummy rows (scores, claims, orders, …) live in supabase/seed.sql.
--- Access codes (app-side only): team-1 = 1842, team-2 = 2715
-insert into public.teams (id, name, short, start_hole, mulligans, string_inches) values
-  ('team-1', 'Group 1', 'G01', 1, 2, 18),
-  ('team-2', 'Group 2', 'G02', 3, 1, 12)
-on conflict (id) do nothing;
+alter table public.teams add column if not exists access_code text;
+update public.teams
+set access_code = case id
+  when 'team-1' then '1842'
+  when 'team-2' then '2715'
+  when 'team-3' then '3168'
+  when 'team-4' then '4093'
+  when 'team-5' then '5581'
+  when 'team-6' then '6027'
+  when 'team-7' then '7344'
+  when 'team-8' then '8621'
+  when 'team-9' then '9450'
+  when 'team-10' then '1076'
+  else '0000'
+end
+where access_code is null;
+alter table public.teams alter column access_code set not null;
+
+create table if not exists public.players (
+  id text primary key,
+  team_id text not null references public.teams(id) on delete cascade,
+  first_name text not null,
+  last_name text not null,
+  position smallint not null check (position between 1 and 4),
+  unique (team_id, position)
+);
 
 create table if not exists public.orders (
   id text primary key,
@@ -97,6 +117,7 @@ alter table public.scores enable row level security;
 alter table public.claims enable row level security;
 alter table public.sales enable row level security;
 alter table public.teams enable row level security;
+alter table public.players enable row level security;
 alter table public.orders enable row level security;
 alter table public.envelopes enable row level security;
 alter table public.tickets enable row level security;
@@ -108,6 +129,7 @@ drop policy if exists "day-of scores" on public.scores;
 drop policy if exists "day-of claims" on public.claims;
 drop policy if exists "day-of sales" on public.sales;
 drop policy if exists "day-of teams" on public.teams;
+drop policy if exists "day-of players" on public.players;
 drop policy if exists "day-of orders" on public.orders;
 drop policy if exists "day-of envelopes" on public.envelopes;
 drop policy if exists "day-of tickets" on public.tickets;
@@ -116,6 +138,7 @@ create policy "day-of scores" on public.scores for all to anon using (true) with
 create policy "day-of claims" on public.claims for all to anon using (true) with check (true);
 create policy "day-of sales" on public.sales for all to anon using (true) with check (true);
 create policy "day-of teams" on public.teams for all to anon using (true) with check (true);
+create policy "day-of players" on public.players for all to anon using (true) with check (true);
 create policy "day-of orders" on public.orders for all to anon using (true) with check (true);
 create policy "day-of envelopes" on public.envelopes for all to anon using (true) with check (true);
 create policy "day-of tickets" on public.tickets for all to anon using (true) with check (true);

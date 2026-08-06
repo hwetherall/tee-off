@@ -47,7 +47,7 @@ import {
   type Team,
 } from "@/src/data/demo";
 import {
-  DEMO_STATE,
+  INITIAL_STATE,
   loadCurrentTeam,
   loadState,
   pendingCount,
@@ -1252,7 +1252,6 @@ function TeamModal({
         </label>
         {error && <p className="field-error">{error}</p>}
         <button className="primary-button" onClick={checkCode} disabled={code.length !== 4}>Open team</button>
-        <div className="demo-code"><span>Demo codes</span><button onClick={() => setCode("1842")}>Group 1 · 1842</button><button onClick={() => setCode("2715")}>Group 2 · 2715</button></div>
         <div className="current-team-note"><Users size={18} /><span>Current: {current.name} · starts hole {current.startHole}</span></div>
       </div>
     </div>
@@ -1260,7 +1259,7 @@ function TeamModal({
 }
 
 export default function GolfDayApp() {
-  const [state, setState] = useState<AppState>(DEMO_STATE);
+  const [state, setState] = useState<AppState>(INITIAL_STATE);
   const [currentTeamId, setCurrentTeamId] = useState("team-1");
   const [tab, setTab] = useState<Tab>("ladder");
   const [hydrated, setHydrated] = useState(false);

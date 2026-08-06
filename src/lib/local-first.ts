@@ -1,11 +1,11 @@
 import { createClient } from "@supabase/supabase-js";
 import {
-  DEMO_CLAIMS,
-  DEMO_ENVELOPES,
-  DEMO_ORDERS,
-  DEMO_SCORES,
-  DEMO_TEAMS,
-  DEMO_TICKETS,
+  INITIAL_CLAIMS,
+  INITIAL_ENVELOPES,
+  INITIAL_ORDERS,
+  INITIAL_SCORES,
+  INITIAL_TEAMS,
+  INITIAL_TICKETS,
   type Claim,
   type Envelope,
   type Order,
@@ -52,16 +52,16 @@ type LegacySale = {
 
 type StoredState = Partial<AppState> & { sales?: LegacySale[] };
 
-const STORAGE_KEY = "bulldogs-golf-day-v1";
+const STORAGE_KEY = "bulldogs-golf-day-v2";
 const TEAM_KEY = "bulldogs-golf-team-v1";
 
-export const DEMO_STATE: AppState = {
-  teams: DEMO_TEAMS,
-  scores: DEMO_SCORES,
-  claims: DEMO_CLAIMS,
-  orders: DEMO_ORDERS,
-  envelopes: DEMO_ENVELOPES,
-  tickets: DEMO_TICKETS,
+export const INITIAL_STATE: AppState = {
+  teams: INITIAL_TEAMS,
+  scores: INITIAL_SCORES,
+  claims: INITIAL_CLAIMS,
+  orders: INITIAL_ORDERS,
+  envelopes: INITIAL_ENVELOPES,
+  tickets: INITIAL_TICKETS,
   photos: [],
   photoDeletes: [],
   timer: { runningSince: null, elapsedMs: 0 },
@@ -83,12 +83,12 @@ function migrateSales(sales: LegacySale[] = []): Order[] {
 }
 
 export function loadState(): AppState {
-  if (typeof window === "undefined") return DEMO_STATE;
+  if (typeof window === "undefined") return INITIAL_STATE;
   const raw = window.localStorage.getItem(STORAGE_KEY);
-  if (!raw) return DEMO_STATE;
+  if (!raw) return INITIAL_STATE;
   try {
     const parsed = JSON.parse(raw) as StoredState;
-    if (!parsed.teams || !parsed.scores || !parsed.claims) return DEMO_STATE;
+    if (!parsed.teams || !parsed.scores || !parsed.claims) return INITIAL_STATE;
     return {
       teams: parsed.teams.map((team, index) => ({ ...team, short: team.short ?? `G${String(index + 1).padStart(2, "0")}` })),
       scores: parsed.scores,
@@ -98,11 +98,11 @@ export function loadState(): AppState {
       tickets: parsed.tickets ?? [],
       photos: parsed.photos ?? [],
       photoDeletes: parsed.photoDeletes ?? [],
-      timer: parsed.timer ?? DEMO_STATE.timer,
+      timer: parsed.timer ?? INITIAL_STATE.timer,
       dirtyTeamIds: parsed.dirtyTeamIds ?? [],
     };
   } catch {
-    return DEMO_STATE;
+    return INITIAL_STATE;
   }
 }
 
@@ -186,6 +186,7 @@ export async function pushPending(state: AppState): Promise<AppState> {
     id: team.id,
     name: team.name,
     short: team.short,
+    access_code: team.code,
     start_hole: team.startHole,
     mulligans: team.mulligans,
     string_inches: team.stringInches,
@@ -273,7 +274,7 @@ function mergeById<T extends { id: string; synced: boolean }>(local: T[], remote
 
 export async function pullRemote(state: AppState): Promise<AppState> {
   if (!supabase) return state;
-  const [scoresResult, claimsResult, ordersResult, envelopesResult, ticketsResult, photosResult, teamsResult] = await Promise.all([
+  const [scoresResult, claimsResult, ordersResult, envelopesResult, ticketsResult, photosResult, teamsResult, playersResult] = await Promise.all([
     supabase.from("scores").select("*"),
     supabase.from("claims").select("*"),
     supabase.from("orders").select("*"),
@@ -281,9 +282,10 @@ export async function pullRemote(state: AppState): Promise<AppState> {
     supabase.from("tickets").select("*"),
     supabase.from("photos").select("*"),
     supabase.from("teams").select("*"),
+    supabase.from("players").select("*").order("team_id").order("position"),
   ]);
   const error = scoresResult.error ?? claimsResult.error ?? ordersResult.error ?? envelopesResult.error
-    ?? ticketsResult.error ?? photosResult.error ?? teamsResult.error;
+    ?? ticketsResult.error ?? photosResult.error ?? teamsResult.error ?? playersResult.error;
   if (error) throw error;
 
   const scores: Score[] = (scoresResult.data ?? []).map((row) => ({
@@ -319,14 +321,32 @@ export async function pullRemote(state: AppState): Promise<AppState> {
     synced: true,
     mine: state.photos.find((photo) => photo.id === row.id)?.mine ?? false,
   }));
-  const teamRows = new Map((teamsResult.data ?? []).map((row) => [row.id, row]));
-  const teams = state.teams.map((team) => {
-    if (state.dirtyTeamIds.includes(team.id)) return team;
-    const row = teamRows.get(team.id);
-    return row
-      ? { ...team, name: row.name, short: row.short, startHole: row.start_hole, mulligans: row.mulligans, stringInches: row.string_inches }
-      : team;
+  const playersByTeam = new Map<string, Team["players"]>();
+  for (const row of playersResult.data ?? []) {
+    const players = playersByTeam.get(row.team_id) ?? [];
+    players.push({
+      id: row.id,
+      name: `${row.first_name} ${row.last_name}`.trim(),
+      teamId: row.team_id,
+    });
+    playersByTeam.set(row.team_id, players);
+  }
+  const localTeams = new Map(state.teams.map((team) => [team.id, team]));
+  const remoteTeams: Team[] = (teamsResult.data ?? []).map((row) => {
+    const local = localTeams.get(row.id);
+    const hasPendingResources = state.dirtyTeamIds.includes(row.id);
+    return {
+      id: row.id,
+      name: row.name,
+      short: row.short,
+      code: row.access_code,
+      startHole: row.start_hole,
+      players: playersByTeam.get(row.id) ?? [],
+      mulligans: hasPendingResources && local ? local.mulligans : row.mulligans,
+      stringInches: hasPendingResources && local ? local.stringInches : row.string_inches,
+    };
   });
+  const teams = remoteTeams.length ? remoteTeams : state.teams;
 
   return {
     ...state,
