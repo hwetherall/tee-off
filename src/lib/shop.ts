@@ -1,7 +1,7 @@
 export const CATALOG = {
   mulligan: { name: "Mulligan", description: "One re-hit for your team", unitAmount: 1000 },
   string: { name: "String extender", description: "One sealed 6–24 inch digital envelope", unitAmount: 2000 },
-  raffle: { name: "50/50 raffle ticket", description: "Half the pot goes to the winner", unitAmount: 2000 },
+  splits: { name: "Banana Splits", description: "Half the pot goes to the winner", unitAmount: 2000 },
 } as const;
 
 export type ProductId = keyof typeof CATALOG;

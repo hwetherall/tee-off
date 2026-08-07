@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import { Barlow_Condensed, Inter } from "next/font/google";
 import { headers } from "next/headers";
 import "./globals.css";
@@ -14,6 +14,15 @@ const barlowCondensed = Barlow_Condensed({
   subsets: ["latin"],
   weight: ["700", "800"],
 });
+
+export const viewport: Viewport = {
+  themeColor: "#0d1e48",
+  // The scorecard stepper and bottom nav are fixed; a pinch-zoom on a bumpy cart
+  // path should not leave the nav off screen. Zoom stays available up to 5x.
+  width: "device-width",
+  initialScale: 1,
+  maximumScale: 5,
+};
 
 export async function generateMetadata(): Promise<Metadata> {
   const requestHeaders = await headers();

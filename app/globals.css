@@ -294,6 +294,12 @@ select:focus-visible {
   text-transform: uppercase;
 }
 
+/* The Phone/TV toggle eats ~130px of the heading row, which pushed "Round
+   standings" onto a second line at phone widths. */
+.section-heading:has(.view-mode) h1 {
+  font-size: clamp(25px, 7.2vw, 36px);
+}
+
 .eyebrow {
   color: var(--red-dark);
   font-size: 11px;
@@ -893,10 +899,14 @@ select:focus-visible {
   display: none;
 }
 
+/* Four contests fit across a 390px phone, so let them share the row instead of
+   clipping "Long putt" off the right edge with no scroll affordance. The
+   overflow rule above stays as a fallback if a fifth contest is ever added. */
 .contest-tabs button {
-  min-width: 92px;
+  flex: 1 1 0;
+  min-width: 0;
   min-height: 58px;
-  padding: 8px 11px;
+  padding: 8px 8px;
   display: flex;
   flex-direction: column;
   justify-content: center;
@@ -1533,7 +1543,7 @@ select:focus-visible {
   margin: auto;
   padding: 6px 6px env(safe-area-inset-bottom);
   display: grid;
-  grid-template-columns: repeat(5, 1fr);
+  grid-template-columns: repeat(6, 1fr);
   background: var(--navy);
   border-top: 4px solid var(--red);
   box-shadow: 0 -10px 24px rgba(13, 30, 72, 0.17);
@@ -2139,10 +2149,47 @@ select:focus-visible {
 }
 
 .shop-checkout {
+  padding: 13px 15px;
+}
+
+/* Only pinned once the basket has something in it, so browsing the shop is never
+   obstructed by a disabled Pay button. */
+.shop-checkout-pinned {
   position: sticky;
   z-index: 3;
   bottom: 78px;
   box-shadow: 0 10px 32px rgba(13, 30, 72, 0.16);
+}
+
+.shop-checkout-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}
+
+.shop-checkout-row > div {
+  margin-bottom: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.shop-checkout-row strong {
+  font-size: 32px;
+}
+
+.shop-checkout-row .primary-button {
+  flex: 1 1 auto;
+  max-width: 62%;
+  margin: 0;
+}
+
+.shop-payment-note {
+  margin: 12px 2px 0;
+  color: var(--muted);
+  font-size: 10px;
+  text-align: center;
 }
 
 .photo-input {
@@ -2556,6 +2603,14 @@ select:focus-visible {
   font-weight: 800;
   letter-spacing: 0.1em;
   text-transform: uppercase;
+}
+
+.form-empty {
+  margin: 0;
+  align-self: center;
+  color: #7c8dba;
+  font-size: clamp(9px, 0.72vw, 12px);
+  font-weight: 700;
 }
 
 .form-column > div {

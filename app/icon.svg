@@ -1,0 +1,13 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" role="img" aria-label="Denver Bulldogs Golf Day">
+  <rect width="128" height="128" rx="22" fill="#07132f"/>
+  <g>
+    <clipPath id="shield">
+      <path d="M22 20h84v58c0 20-18 30-42 30S22 98 22 78Z"/>
+    </clipPath>
+    <path d="M22 20h84v58c0 20-18 30-42 30S22 98 22 78Z" fill="#2a4c9e" stroke="#ffffff" stroke-width="7"/>
+    <g clip-path="url(#shield)">
+      <rect x="-14" y="58" width="156" height="17" fill="#d31f2b" transform="rotate(-19 64 66)"/>
+    </g>
+    <text x="64" y="72" text-anchor="middle" fill="#ffffff" font-family="Barlow Condensed, Helvetica Neue, Arial, sans-serif" font-size="46" font-weight="800" letter-spacing="1">DB</text>
+  </g>
+</svg>

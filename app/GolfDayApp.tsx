@@ -50,9 +50,11 @@ import {
   INITIAL_STATE,
   loadCurrentTeam,
   loadState,
+  makeBalanceDelta,
   pendingCount,
   pullRemote,
   pushPending,
+  reconcile,
   remoteConfigured,
   saveCurrentTeam,
   saveState,
@@ -64,14 +66,18 @@ type Tab = "ladder" | "card" | "prizes" | "shop" | "photos" | "info";
 type ProductId = (typeof PRODUCTS)[number]["id"];
 type ContestId = (typeof CONTESTS)[number]["id"];
 
-const NAV_ITEMS = [
+// Social Upload (Photos tab) is paused for now. Flip to true to bring it back —
+// PhotosScreen and sync/upload code stay in place.
+const PHOTOS_TAB_ENABLED = false;
+
+const NAV_ITEMS: { id: Tab; label: string; Icon: typeof Trophy }[] = [
   { id: "ladder", label: "Ladder", Icon: Trophy },
   { id: "card", label: "Card", Icon: NotebookPen },
   { id: "prizes", label: "Prizes", Icon: Medal },
   { id: "shop", label: "Shop", Icon: ShoppingBag },
-  { id: "photos", label: "Photos", Icon: Images },
+  ...(PHOTOS_TAB_ENABLED ? [{ id: "photos" as const, label: "Photos", Icon: Images }] : []),
   { id: "info", label: "Info", Icon: Info },
-] as const;
+];
 
 function makeId(prefix: string) {
   const value = typeof crypto !== "undefined" && "randomUUID" in crypto
@@ -354,16 +360,18 @@ function CardScreen({
   };
 
   const updateTeamBalance = (kind: "mulligan" | "string", amount: number) => {
+    const spentMulligans = kind === "mulligan" ? amount : 0;
+    const spentInches = kind === "string" ? amount : 0;
     onState((current) => ({
       ...current,
       teams: current.teams.map((team) => team.id === currentTeam.id
         ? {
           ...team,
-          mulligans: kind === "mulligan" ? Math.max(0, team.mulligans - amount) : team.mulligans,
-          stringInches: kind === "string" ? Math.max(0, team.stringInches - amount) : team.stringInches,
+          mulligans: Math.max(0, team.mulligans - spentMulligans),
+          stringInches: Math.max(0, team.stringInches - spentInches),
         }
         : team),
-      dirtyTeamIds: [...new Set([...current.dirtyTeamIds, currentTeam.id])],
+      balanceDeltas: [...current.balanceDeltas, makeBalanceDelta(currentTeam.id, -spentMulligans, -spentInches)],
     }));
     notify(kind === "mulligan" ? "Mulligan used" : `${amount} in of string used`);
   };
@@ -434,7 +442,6 @@ function CardScreen({
           {completed.length === 0 && <p>No completed holes yet.</p>}
         </div>
       )}
-      <div className="data-warning"><Info size={16} /><span>Demo scorecard only. Pars and yardages are not verified.</span></div>
       {stringUseOpen && (
         <div className="modal-backdrop" role="presentation">
           <div className="modal" role="dialog" aria-modal="true" aria-labelledby="string-title">
@@ -513,7 +520,11 @@ function PrizesScreen({
     let numericMark = Number(mark);
     if (selected === "closest") numericMark = Number(feet) * 12 + Number(inches);
     if (selected === "speed") numericMark = elapsed / 1000;
-    if (!Number.isFinite(numericMark) || numericMark <= 0) {
+    // Zero is legitimate for closest-to-the-pin: a hole in one, or a gimme that
+    // measures under half an inch. Only the timed and distance contests need a
+    // mark above zero.
+    const allowsZero = selected === "closest";
+    if (!Number.isFinite(numericMark) || numericMark < 0 || (!allowsZero && numericMark <= 0)) {
       notify("Enter a valid mark");
       return;
     }
@@ -657,6 +668,11 @@ function applyOrder(
     teamId: order.teamId,
     synced: false,
   }));
+  // A Stripe order is credited server-side by the webhook, so this device shows
+  // the mulligans immediately but must NOT also push an adjustment or the team
+  // gets charged once and credited twice. A volunteer sale never touches the
+  // webhook, so there the device owns the adjustment.
+  const clientOwnsCredit = order.channel === "volunteer";
   return {
     ...current,
     orders: [...current.orders, order],
@@ -665,9 +681,9 @@ function applyOrder(
     teams: current.teams.map((team) => team.id === order.teamId
       ? { ...team, mulligans: team.mulligans + mulligans }
       : team),
-    dirtyTeamIds: mulligans
-      ? [...new Set([...current.dirtyTeamIds, order.teamId])]
-      : current.dirtyTeamIds,
+    balanceDeltas: mulligans && clientOwnsCredit
+      ? [...current.balanceDeltas, makeBalanceDelta(order.teamId, mulligans, 0)]
+      : current.balanceDeltas,
   };
 }
 
@@ -712,7 +728,7 @@ function ShopScreen({
   onState: React.Dispatch<React.SetStateAction<AppState>>;
   notify: (message: string) => void;
 }) {
-  const emptyCart = { mulligan: 0, string: 0, raffle: 0 } satisfies Record<ProductId, number>;
+  const emptyCart = { mulligan: 0, string: 0, splits: 0 } satisfies Record<ProductId, number>;
   const [mode, setMode] = useState<"self" | "volunteer">("self");
   const [selfCart, setSelfCart] = useState<Record<ProductId, number>>(emptyCart);
   const [volunteerCart, setVolunteerCart] = useState<Record<ProductId, number>>(emptyCart);
@@ -726,7 +742,7 @@ function ShopScreen({
   const selfTotal = PRODUCTS.reduce((sum, product) => sum + selfCart[product.id] * product.price, 0);
   const volunteerTotal = PRODUCTS.reduce((sum, product) => sum + volunteerCart[product.id] * product.price, 0);
   const dayTotal = state.orders.reduce((sum, order) => sum + order.amount, 0);
-  const raffleTotal = state.orders.reduce((sum, order) => sum + orderQuantity(order, "raffle") * 20, 0);
+  const splitsTotal = state.orders.reduce((sum, order) => sum + orderQuantity(order, "splits") * 20, 0);
   const teamEnvelopes = state.envelopes.filter((envelope) => envelope.teamId === currentTeam.id);
   const teamTickets = state.tickets.filter((ticket) => ticket.teamId === currentTeam.id);
 
@@ -826,13 +842,13 @@ function ShopScreen({
       synced: false,
     };
     const stringQty = volunteerCart.string;
-    const raffleQty = volunteerCart.raffle;
+    const splitsQty = volunteerCart.splits;
     const stamp = Date.now().toString(36).toUpperCase().slice(-6);
     onState((current) => applyOrder(
       current,
       order,
       Array.from({ length: stringQty }, (_, index) => `envelope-${orderId}-${index + 1}`),
-      Array.from({ length: raffleQty }, (_, index) => ({ id: `ticket-${orderId}-${index + 1}`, number: `DB-${stamp}-${String(index + 1).padStart(2, "0")}` })),
+      Array.from({ length: splitsQty }, (_, index) => ({ id: `ticket-${orderId}-${index + 1}`, number: `DB-${stamp}-${String(index + 1).padStart(2, "0")}` })),
     ));
     setVolunteerCart(emptyCart);
     notify(`$${volunteerTotal} sale saved`);
@@ -853,7 +869,7 @@ function ShopScreen({
         teams: current.teams.map((team) => team.id === envelope.teamId
           ? { ...team, stringInches: team.stringInches + inches }
           : team),
-        dirtyTeamIds: [...new Set([...current.dirtyTeamIds, envelope.teamId])],
+        balanceDeltas: [...current.balanceDeltas, makeBalanceDelta(envelope.teamId, 0, inches)],
       }));
       setRevealing(null);
       notify(`${inches} in of string added`);
@@ -869,7 +885,7 @@ function ShopScreen({
       </div>
       <div className="sales-total-card compact-totals">
         <div><span>Raised today</span><strong>${dayTotal.toLocaleString()}</strong></div>
-        <div><span>50/50 pot</span><strong>${raffleTotal.toLocaleString()}</strong><small>${(raffleTotal / 2).toLocaleString()} to winner</small></div>
+        <div><span>Banana Splits pot</span><strong>${splitsTotal.toLocaleString()}</strong><small>${(splitsTotal / 2).toLocaleString()} to winner</small></div>
       </div>
 
       {mode === "self" ? (
@@ -886,7 +902,7 @@ function ShopScreen({
               ))}
               {teamTickets.length > 0 && (
                 <div className="ticket-wallet">
-                  <span>50/50 ticket numbers</span>
+                  <span>Banana Splits numbers</span>
                   <div>{teamTickets.map((ticket) => <strong key={ticket.id}>{ticket.number}</strong>)}</div>
                 </div>
               )}
@@ -895,13 +911,18 @@ function ShopScreen({
           {!paymentReady && <div className="payment-setup"><LockKeyhole /><span><strong>Payments need setup</strong>Connect the club’s Stripe account before enabling checkout.</span></div>}
           {!online && <div className="no-signal-shop"><WifiOff /><span>No signal here. Your basket stays put; try again near the clubhouse or flag down the cart.</span></div>}
           <ProductPicker cart={selfCart} onAdjust={adjustSelf} />
-          <div className="sale-checkout shop-checkout">
-            <div><span>Basket</span><strong>${selfTotal}</strong></div>
-            <button className="primary-button" disabled={selfTotal === 0 || checkingOut} onClick={checkout}>
-              {checkingOut ? "Opening secure payment" : paymentReady ? `Pay $${selfTotal}` : "Payments not connected"}
-            </button>
-            <p>Apple Pay or Google Pay when available. Card is the fallback. Stripe collects an email for the receipt.</p>
+          {/* The pay bar only pins itself once there is something to pay for.
+              An empty basket used to float a 194px card over two of the three
+              products, so you had to scroll to discover most of the shop. */}
+          <div className={`sale-checkout shop-checkout ${selfTotal > 0 ? "shop-checkout-pinned" : ""}`}>
+            <div className="shop-checkout-row">
+              <div><span>Basket</span><strong>${selfTotal}</strong></div>
+              <button className="primary-button" disabled={selfTotal === 0 || checkingOut} onClick={checkout}>
+                {checkingOut ? "Opening payment" : paymentReady ? `Pay $${selfTotal}` : "Payments not connected"}
+              </button>
+            </div>
           </div>
+          <p className="shop-payment-note">Apple Pay or Google Pay when available. Card is the fallback. Stripe collects an email for the receipt.</p>
         </>
       ) : (
         <>
@@ -920,7 +941,7 @@ function ShopScreen({
           <div className="sale-checkout">
             <div><span>Sale total</span><strong>${volunteerTotal}</strong></div>
             <button className="primary-button" disabled={volunteerTotal === 0} onClick={saveVolunteerOrder}>Save ${volunteerTotal} sale</button>
-            <p>String creates a sealed envelope. Raffle numbers appear for the assigned team.</p>
+            <p>String creates a sealed envelope. Banana Splits numbers appear for the assigned team.</p>
           </div>
         </>
       )}
@@ -945,7 +966,9 @@ function PhotosScreen({
   const [adding, setAdding] = useState(false);
   const [moderating, setModerating] = useState(false);
   const played = teamScores(state.scores, currentTeam.id).length;
-  const currentHole = holeSequence(currentTeam.startHole)[played % 18];
+  // A finished team stays on their last hole rather than wrapping to the start.
+  const sequence = holeSequence(currentTeam.startHole);
+  const currentHole = sequence[Math.min(played, 17)];
   const photos = [...state.photos].sort((a, b) => b.takenAt.localeCompare(a.takenAt));
 
   const addPhotos = async (files: FileList | null) => {
@@ -1065,7 +1088,6 @@ function InfoScreen({ onClubhouse }: { onClubhouse: (mode: "course" | "bbq") => 
           <div><b>12</b><span>Speed hole · Dakota H, David P</span></div>
           <div><b>15</b><span>Long drive</span></div>
           <div><b>18</b><span>Longest putt</span></div>
-          <div><b>?</b><span>Beat the Pro · hole and price TBC</span></div>
         </div>
       </div>
       <div className="info-card clubhouse-links">
@@ -1103,7 +1125,7 @@ function ClubhouseView({
   onClose: () => void;
 }) {
   const ranked = rankTeams(state.teams, state.scores);
-  const raffleTotal = state.orders.reduce((sum, order) => sum + orderQuantity(order, "raffle") * 20, 0);
+  const splitsTotal = state.orders.reduce((sum, order) => sum + orderQuantity(order, "splits") * 20, 0);
   const form = state.teams
     .map((team) => ({ team, value: lastThreeForm(team, state.scores) }))
     .filter((item): item is { team: Team; value: number } => item.value !== null);
@@ -1135,7 +1157,7 @@ function ClubhouseView({
       </header>
       <div className="clubhouse-top-grid">
         <section className="clubhouse-board">
-          <div className="clubhouse-block-title"><span>Live ladder</span><small>Top 10</small></div>
+          <div className="clubhouse-block-title"><span>Live ladder</span><small>{ranked.length > 10 ? "Top 10" : "All groups"}</small></div>
           <div className="clubhouse-table-head"><span>Pos</span><span>Team</span><span>Holes</span><span>Score</span></div>
           {ranked.slice(0, 10).map((item) => (
             <div className="clubhouse-row" key={item.team.id}>
@@ -1148,10 +1170,10 @@ function ClubhouseView({
         </section>
         <aside className="clubhouse-pot">
           <CircleDollarSign />
-          <span>Live 50/50 pot</span>
-          <strong>${raffleTotal.toLocaleString()}</strong>
-          <b>${(raffleTotal / 2).toLocaleString()} to the winner</b>
-          <small>Tickets are $20 in the app or from the roaming cart</small>
+          <span>Live Banana Splits pot</span>
+          <strong>${splitsTotal.toLocaleString()}</strong>
+          <b>${(splitsTotal / 2).toLocaleString()} to the winner</b>
+          <small>Banana Splits are $20 in the app or from the roaming cart</small>
         </aside>
       </div>
       <div className="clubhouse-lower-grid">
@@ -1186,9 +1208,21 @@ function ClubhouseView({
             ) : <div className="clubhouse-no-photos"><Camera /><span>Course photos will appear here</span></div>}
           </section>
         )}
+        {/* Form needs three scored holes, so this block is empty for the first
+            stretch after the shotgun. Say so rather than showing a bare box. */}
         <section className="form-block">
-          <div className="form-column hot-form"><span>Hot hands</span>{hot.map((item) => <div key={item.team.id}><b>{item.team.short}</b><strong>{item.team.name}</strong><em>{formatRelative(item.value)}</em></div>)}</div>
-          <div className="form-column missing-form"><span>Gone missing</span>{missing.map((item) => <div key={item.team.id}><b>{item.team.short}</b><strong>{item.team.name}</strong><em>{formatRelative(item.value)}</em></div>)}</div>
+          <div className="form-column hot-form">
+            <span>Hot hands</span>
+            {hot.length
+              ? hot.map((item) => <div key={item.team.id}><b>{item.team.short}</b><strong>{item.team.name}</strong><em>{formatRelative(item.value)}</em></div>)
+              : <p className="form-empty">After three holes</p>}
+          </div>
+          <div className="form-column missing-form">
+            <span>Gone missing</span>
+            {missing.length
+              ? missing.map((item) => <div key={item.team.id}><b>{item.team.short}</b><strong>{item.team.name}</strong><em>{formatRelative(item.value)}</em></div>)
+              : <p className="form-empty">After three holes</p>}
+          </div>
         </section>
       </div>
       <footer><span>Applewood Golf Course · {EVENT.date}</span><span>Updates every 20 seconds</span></footer>
@@ -1313,8 +1347,11 @@ export default function GolfDayApp() {
     setSyncing(true);
     try {
       const pushed = await pushPending(stateRef.current);
-      const pulled = await pullRemote(pushed);
-      setState(pulled);
+      const remote = await pullRemote();
+      // Reconcile against the state as it is NOW, not the snapshot this pass
+      // started from. A push plus a photo upload can take many seconds on course
+      // signal, and a hole saved inside that window used to be overwritten.
+      setState((current) => reconcile(current, pushed, remote));
     } catch {
       // Pending writes remain in local storage and will retry on the next pass.
     } finally {
@@ -1382,7 +1419,7 @@ export default function GolfDayApp() {
           {tab === "card" && <CardScreen state={state} currentTeam={currentTeam} onState={setState} notify={notify} requestConfirm={setConfirm} />}
           {tab === "prizes" && <PrizesScreen state={state} currentTeam={currentTeam} onState={setState} notify={notify} requestConfirm={setConfirm} />}
           {tab === "shop" && <ShopScreen state={state} currentTeam={currentTeam} online={online} onState={setState} notify={notify} />}
-          {tab === "photos" && <PhotosScreen state={state} currentTeam={currentTeam} onState={setState} notify={notify} requestConfirm={setConfirm} />}
+          {PHOTOS_TAB_ENABLED && tab === "photos" && <PhotosScreen state={state} currentTeam={currentTeam} onState={setState} notify={notify} requestConfirm={setConfirm} />}
           {tab === "info" && <InfoScreen onClubhouse={openClubhouse} />}
         </div>
         <nav className="bottom-nav" aria-label="Main navigation">

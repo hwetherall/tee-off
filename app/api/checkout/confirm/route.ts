@@ -25,7 +25,7 @@ export async function GET(request: Request) {
   ) {
     return NextResponse.json({ error: "Payment details are invalid." }, { status: 422 });
   }
-  const raffleQty = lines.find((line) => line.productId === "raffle")?.qty ?? 0;
+  const splitsQty = lines.find((line) => line.productId === "splits")?.qty ?? 0;
   const stringQty = lines.find((line) => line.productId === "string")?.qty ?? 0;
   const prefix = ticketPrefix(session.id);
 
@@ -42,7 +42,7 @@ export async function GET(request: Request) {
       synced: false,
     },
     envelopeIds: Array.from({ length: stringQty }, (_, index) => `envelope-${session.id}-${index + 1}`),
-    tickets: Array.from({ length: raffleQty }, (_, index) => ({
+    tickets: Array.from({ length: splitsQty }, (_, index) => ({
       id: `ticket-${session.id}-${index + 1}`,
       number: `DB-${prefix}-${String(index + 1).padStart(2, "0")}`,
     })),

@@ -29,6 +29,11 @@ export async function POST(request: Request) {
   const session = await stripe.checkout.sessions.create({
     mode: "payment",
     customer_creation: "always",
+    // Card only, pinned here rather than in the dashboard so it stays in version
+    // control. Apple Pay and Google Pay ride on "card" and still appear. This
+    // deliberately excludes Klarna, Affirm, Cash App, Amazon Pay, Link and the
+    // international methods the account has switched on by default.
+    payment_method_types: ["card"],
     line_items: lines.map((line) => ({
       quantity: line.qty,
       price_data: {

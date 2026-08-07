@@ -54,7 +54,7 @@ async function fulfillCheckout(
   const orderId = `order-${session.id}`;
   const mulliganQty = lines.find((line) => line.productId === "mulligan")?.qty ?? 0;
   const stringQty = lines.find((line) => line.productId === "string")?.qty ?? 0;
-  const raffleQty = lines.find((line) => line.productId === "raffle")?.qty ?? 0;
+  const splitsQty = lines.find((line) => line.productId === "splits")?.qty ?? 0;
   const prefix = ticketPrefix(session.id);
 
   const { data, error } = await supabase.rpc("fulfill_stripe_checkout", {
@@ -67,7 +67,7 @@ async function fulfillCheckout(
     p_order_id: orderId,
     p_payment_ref: session.id,
     p_team_id: teamId,
-    p_tickets: Array.from({ length: raffleQty }, (_, index) => ({
+    p_tickets: Array.from({ length: splitsQty }, (_, index) => ({
       id: `ticket-${session.id}-${index + 1}`,
       number: `DB-${prefix}-${String(index + 1).padStart(2, "0")}`,
     })),

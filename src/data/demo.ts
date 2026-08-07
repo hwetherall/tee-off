@@ -46,7 +46,7 @@ export type Claim = {
 };
 
 export type OrderLine = {
-  productId: "mulligan" | "string" | "raffle";
+  productId: "mulligan" | "string" | "splits";
   qty: number;
 };
 
@@ -102,31 +102,34 @@ export const EVENT = {
   startTime: "1:30 pm",
 } as const;
 
-// ASSUMPTION: These pars and every yardage below are placeholders. Replace the
-// full holes array with Applewood's official card before this reaches golfers.
+// SOURCED FROM PUBLISHED SCORECARDS, not club-confirmed. Two independent
+// sources (golflink.com and 18birdies.com) agree on this card: out 36, in 35,
+// par 71, 6,188 yd from the Blue tees. Yardages are Blue; they are display-only
+// and do not affect scoring. Pars DO drive every ladder position, so if Jay can
+// hand over the official card, diff it against this before the shotgun.
 export const COURSE = {
-  id: "applewood-placeholder",
+  id: "applewood",
   name: "Applewood Golf Course",
   par: 71,
   holes: [
-    { number: 1, par: 4, yards: 372 },
-    { number: 2, par: 3, yards: 148 },
-    { number: 3, par: 4, yards: 394 },
-    { number: 4, par: 4, yards: 355 },
-    { number: 5, par: 5, yards: 512 },
-    { number: 6, par: 4, yards: 381 },
-    { number: 7, par: 3, yards: 172 },
-    { number: 8, par: 4, yards: 405 },
-    { number: 9, par: 4, yards: 367 },
-    { number: 10, par: 4, yards: 389 },
-    { number: 11, par: 4, yards: 361 },
-    { number: 12, par: 3, yards: 156 },
-    { number: 13, par: 4, yards: 402 },
-    { number: 14, par: 4, yards: 344 },
-    { number: 15, par: 5, yards: 526 },
-    { number: 16, par: 4, yards: 376 },
-    { number: 17, par: 4, yards: 410 },
-    { number: 18, par: 4, yards: 358 },
+    { number: 1, par: 4, yards: 294 },
+    { number: 2, par: 3, yards: 119 },
+    { number: 3, par: 4, yards: 381 },
+    { number: 4, par: 5, yards: 458 },
+    { number: 5, par: 4, yards: 416 },
+    { number: 6, par: 4, yards: 374 },
+    { number: 7, par: 5, yards: 471 },
+    { number: 8, par: 4, yards: 344 },
+    { number: 9, par: 3, yards: 203 },
+    { number: 10, par: 4, yards: 381 },
+    { number: 11, par: 3, yards: 173 },
+    { number: 12, par: 4, yards: 379 },
+    { number: 13, par: 4, yards: 426 },
+    { number: 14, par: 3, yards: 151 },
+    { number: 15, par: 5, yards: 527 },
+    { number: 16, par: 5, yards: 529 },
+    { number: 17, par: 3, yards: 181 },
+    { number: 18, par: 4, yards: 381 },
   ] satisfies Hole[],
 } as const;
 
@@ -178,5 +181,5 @@ export const CONTESTS = [
 export const PRODUCTS = [
   { id: "mulligan", name: "Mulligan", price: 10, note: "One re-hit" },
   { id: "string", name: "String", price: 20, note: "Sealed 6–24 in envelope" },
-  { id: "raffle", name: "50/50 ticket", price: 20, note: "Half the pot goes to the winner" },
+  { id: "splits", name: "Banana Splits", price: 20, note: "Half the pot goes to the winner" },
 ] as const;
