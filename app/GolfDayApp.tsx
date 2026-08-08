@@ -48,6 +48,7 @@ import {
   type Score,
   type Team,
 } from "@/src/data/demo";
+import { PAYMENTS_ENABLED } from "@/src/lib/shop";
 import {
   INITIAL_STATE,
   loadCurrentTeam,
@@ -367,6 +368,9 @@ function CardScreen({
   const availableStrings = state.envelopes.filter((envelope) => (
     envelope.teamId === currentTeam.id && envelope.collectedAt && !envelope.usedAt
   ));
+  const teamTab = state.orders
+    .filter((order) => order.teamId === currentTeam.id && !order.paymentRef)
+    .reduce((sum, order) => sum + order.amount, 0);
 
   const saveScore = () => {
     if (!activeHole) return;
@@ -445,6 +449,15 @@ function CardScreen({
         <div><span>Mulligans</span><strong>{currentTeam.mulligans}</strong></div>
         <div><span>Strings ready</span><strong>{availableStrings.length}</strong></div>
       </div>
+      {!PAYMENTS_ENABLED && (
+        <div className="volunteer-note">
+          <BadgeDollarSign />
+          <span>
+            <strong>Team {currentTeam.id.replace("team-", "")} — ${teamTab} on the tab</strong>
+            Harry will text your captain a payment link after the round.
+          </span>
+        </div>
+      )}
 
       {activeHole ? (
         <div className="score-entry-card">
@@ -733,7 +746,7 @@ function applyOrder(
 ) {
   if (current.orders.some((item) => item.id === order.id)) return current;
   const mulligans = orderQuantity(order, "mulligan");
-  const fulfilledServerSide = order.channel === "self";
+  const fulfilledServerSide = Boolean(order.paymentRef);
   const envelopes: Envelope[] = envelopeIds.map((id) => ({
     id,
     orderId: order.id,
@@ -752,9 +765,10 @@ function applyOrder(
   }));
   // A Stripe order and its items are written server-side by the webhook. The
   // confirmation copy is display-only; pushing it from the browser could race
-  // the webhook and leave a paid order without its credits. A volunteer sale
-  // never touches the webhook, so there the device owns every pending write.
-  const clientOwnsCredit = order.channel === "volunteer";
+  // the webhook and leave a paid order without its credits. An order with no
+  // payment reference (volunteer sale or IOU tab purchase) never touches the
+  // webhook, so there the device owns every pending write.
+  const clientOwnsCredit = !order.paymentRef;
   return {
     ...current,
     orders: [...current.orders, order],
@@ -916,7 +930,42 @@ function ShopScreen({
     setVolunteerCart((current) => ({ ...current, [product]: Math.max(0, Math.min(20, current[product] + amount)) }));
   };
 
+  const putOnTab = () => {
+    const lines = basketLines(selfCart, selfBeneficiary);
+    if (!lines.length) return;
+    const orderId = makeId("order");
+    const stamp = Date.now().toString(36).toUpperCase().slice(-6);
+    const order: Order = {
+      id: orderId,
+      teamId: currentTeam.id,
+      buyerId: currentTeam.id,
+      lines,
+      amount: selfTotal,
+      channel: "self",
+      paymentRef: null,
+      createdAt: new Date().toISOString(),
+      synced: false,
+    };
+    onState((current) => applyOrder(
+      current,
+      order,
+      Array.from({ length: selfCart.string }, (_, index) => `envelope-${orderId}-${index + 1}`),
+      Array.from({ length: selfCart.splits }, (_, index) => ({
+        id: `ticket-${orderId}-${index + 1}`,
+        number: `DB-${stamp}-${String(index + 1).padStart(2, "0")}`,
+        beneficiaryType: selfBeneficiary === "team" ? "team" as const : "player" as const,
+        beneficiaryPlayerId: selfBeneficiary === "team" ? null : selfBeneficiary,
+      })),
+    ));
+    setSelfCart(EMPTY_CART);
+    notify(`Added to Team ${currentTeam.id.replace("team-", "")}'s tab. Harry will send a payment link after the round.`);
+  };
+
   const checkout = async () => {
+    if (!PAYMENTS_ENABLED) {
+      putOnTab();
+      return;
+    }
     if (!online) {
       notify("No signal here. Try again near the clubhouse, or flag down the cart");
       return;
@@ -998,6 +1047,12 @@ function ShopScreen({
         <button className={mode === "self" ? "active" : ""} onClick={() => setMode("self")}><ShoppingBag /> Buy for my team</button>
         <button className={mode === "volunteer" ? "active" : ""} onClick={() => setMode("volunteer")}><BadgeDollarSign /> Volunteer sales</button>
       </div>
+      {!PAYMENTS_ENABLED && (
+        <div className="payment-setup">
+          <BadgeDollarSign />
+          <span><strong>Card payments are down today.</strong>Buy now, settle up tonight — we’ll text your captain a link.</span>
+        </div>
+      )}
       <div className="sales-total-card compact-totals">
         <div><span>Raised today</span><strong>${dayTotal.toLocaleString()}</strong></div>
         <div><span>Banana Splits pot</span><strong>${splitsTotal.toLocaleString()}</strong><small>${(splitsTotal / 2).toLocaleString()} to winner</small></div>
@@ -1044,8 +1099,8 @@ function ShopScreen({
               )}
             </div>
           )}
-          {!paymentReady && <div className="payment-setup"><LockKeyhole /><span><strong>Payments need setup</strong>Connect the club’s Stripe account before enabling checkout.</span></div>}
-          {!online && <div className="no-signal-shop"><WifiOff /><span>No signal here. Your basket stays put; try again near the clubhouse or flag down the cart.</span></div>}
+          {PAYMENTS_ENABLED && !paymentReady && <div className="payment-setup"><LockKeyhole /><span><strong>Payments need setup</strong>Connect the club’s Stripe account before enabling checkout.</span></div>}
+          {PAYMENTS_ENABLED && !online && <div className="no-signal-shop"><WifiOff /><span>No signal here. Your basket stays put; try again near the clubhouse or flag down the cart.</span></div>}
           <ProductPicker cart={selfCart} onAdjust={adjustSelf} />
           {selfCart.splits > 0 && (
             <SplitsBeneficiaryPicker team={currentTeam} value={selfBeneficiary} onChange={setSelfSplitsBeneficiary} />
@@ -1057,11 +1112,11 @@ function ShopScreen({
             <div className="shop-checkout-row">
               <div><span>Basket</span><strong>${selfTotal}</strong></div>
               <button className="primary-button" disabled={selfTotal === 0 || checkingOut} onClick={checkout}>
-                {checkingOut ? "Opening payment" : paymentReady ? `Pay $${selfTotal}` : "Payments not connected"}
+                {checkingOut ? "Opening payment" : !PAYMENTS_ENABLED ? "Put it on the tab" : paymentReady ? `Pay $${selfTotal}` : "Payments not connected"}
               </button>
             </div>
           </div>
-          <p className="shop-payment-note">Apple Pay or Google Pay when available. Card is the fallback. Stripe collects an email for the receipt.</p>
+          {PAYMENTS_ENABLED && <p className="shop-payment-note">Apple Pay or Google Pay when available. Card is the fallback. Stripe collects an email for the receipt.</p>}
         </>
       ) : (
         <>
