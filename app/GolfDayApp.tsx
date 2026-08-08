@@ -341,18 +341,25 @@ function CardScreen({
   onState,
   notify,
   requestConfirm,
+  onPrizeHole,
 }: {
   state: AppState;
   currentTeam: Team;
   onState: React.Dispatch<React.SetStateAction<AppState>>;
   notify: (message: string) => void;
   requestConfirm: (options: ConfirmOptions) => void;
+  onPrizeHole: (contestId: ContestId) => void;
 }) {
   const completed = teamScores(state.scores, currentTeam.id);
   const sequence = holeSequence(currentTeam.startHole);
   const nextHole = sequence.find((hole) => !completed.some((score) => score.hole === hole));
   const [editHole, setEditHole] = useState<number | null>(null);
   const activeHole = editHole ?? nextHole ?? null;
+  // Only for the hole the group is standing on. Correcting hole 2 from the
+  // history list later in the round must not tell them to claim a mark.
+  const prizeContest = editHole === null && activeHole !== null
+    ? CONTESTS.find((contest) => contest.hole === activeHole)
+    : undefined;
   const activeScore = activeHole ? completed.find((score) => score.hole === activeHole) : undefined;
   const par = activeHole ? COURSE.holes[activeHole - 1].par : 0;
   // The draft is tagged with the hole it belongs to and falls back to par for any
@@ -463,6 +470,17 @@ function CardScreen({
         </div>
       )}
 
+      {prizeContest && (
+        <div className="prize-hole-alert">
+          <Flag size={22} />
+          <span>
+            <strong>Prize hole {prizeContest.hole} · {prizeContest.name}</strong>
+            <small>Claim your mark before you drive on.</small>
+          </span>
+          <button onClick={() => onPrizeHole(prizeContest.id)}>Claim</button>
+        </div>
+      )}
+
       {activeHole ? (
         <div className="score-entry-card">
           <div className="hole-kicker">{editHole ? "Correcting" : "Now scoring"}</div>
@@ -526,14 +544,18 @@ function PrizesScreen({
   onState,
   notify,
   requestConfirm,
+  focusContest,
 }: {
   state: AppState;
   currentTeam: Team;
   onState: React.Dispatch<React.SetStateAction<AppState>>;
   notify: (message: string) => void;
   requestConfirm: (options: ConfirmOptions) => void;
+  focusContest: ContestId | null;
 }) {
-  const [selected, setSelected] = useState<ContestId>("closest");
+  // Safe as an initial value rather than an effect: this screen unmounts when
+  // the tab changes, so arriving from the Card tab always mounts it fresh.
+  const [selected, setSelected] = useState<ContestId>(focusContest ?? "closest");
   const [claimOpen, setClaimOpen] = useState(false);
   const [speedTeamChoice, setSpeedTeamChoice] = useState("");
   const [playerChoice, setPlayerChoice] = useState("");
@@ -1643,6 +1665,7 @@ export default function GolfDayApp() {
   const [syncing, setSyncing] = useState(false);
   const [clubhouseMode, setClubhouseMode] = useState<"course" | "bbq" | null>(null);
   const [teamModal, setTeamModal] = useState(false);
+  const [prizeFocus, setPrizeFocus] = useState<ContestId | null>(null);
   const [confirm, setConfirm] = useState<ConfirmOptions | null>(null);
   const [toast, setToast] = useState("");
   // The sync loop needs the freshest state without re-subscribing every render.
@@ -1770,15 +1793,15 @@ export default function GolfDayApp() {
         <SyncLine online={online} pending={pending} syncing={syncing} />
         <div className="app-content">
           {tab === "ladder" && <LadderScreen state={state} currentTeamId={currentTeam.id} onClubhouse={() => openClubhouse("course")} />}
-          {tab === "card" && <CardScreen state={state} currentTeam={currentTeam} onState={setState} notify={notify} requestConfirm={setConfirm} />}
-          {tab === "prizes" && <PrizesScreen state={state} currentTeam={currentTeam} onState={setState} notify={notify} requestConfirm={setConfirm} />}
+          {tab === "card" && <CardScreen state={state} currentTeam={currentTeam} onState={setState} notify={notify} requestConfirm={setConfirm} onPrizeHole={(contestId) => { setPrizeFocus(contestId); setTab("prizes"); window.scrollTo({ top: 0, behavior: "smooth" }); }} />}
+          {tab === "prizes" && <PrizesScreen state={state} currentTeam={currentTeam} onState={setState} notify={notify} requestConfirm={setConfirm} focusContest={prizeFocus} />}
           {tab === "shop" && <ShopScreen state={state} currentTeam={currentTeam} online={online} onState={setState} notify={notify} requestConfirm={setConfirm} />}
           {PHOTOS_TAB_ENABLED && tab === "photos" && <PhotosScreen state={state} currentTeam={currentTeam} onState={setState} notify={notify} requestConfirm={setConfirm} />}
           {tab === "info" && <InfoScreen onClubhouse={openClubhouse} />}
         </div>
         <nav className="bottom-nav" aria-label="Main navigation">
           {NAV_ITEMS.map(({ id, label, Icon }) => (
-            <button key={id} className={tab === id ? "active" : ""} onClick={() => { setTab(id); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
+            <button key={id} className={tab === id ? "active" : ""} onClick={() => { setPrizeFocus(null); setTab(id); window.scrollTo({ top: 0, behavior: "smooth" }); }}>
               <Icon size={22} strokeWidth={tab === id ? 2.8 : 2.2} /><span>{label}</span>
             </button>
           ))}
