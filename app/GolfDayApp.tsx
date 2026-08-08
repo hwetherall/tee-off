@@ -33,6 +33,7 @@ import {
 } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
+  CONTACTS,
   CONTESTS,
   COURSE,
   EVENT,
@@ -1117,8 +1118,19 @@ function InfoScreen({ onClubhouse }: { onClubhouse: (mode: "course" | "bbq") => 
       </div>
       <div className="info-card contact-card">
         <div className="info-card-title"><Phone /><h3>Need help?</h3></div>
-        <p>Jay Blistan · Events Chair</p>
-        <a className="primary-button" href="tel:+12035055555">Call 203-505-5555</a>
+        <p>Tap any name to call. Someone will pick up.</p>
+        <div className="contact-list">
+          {CONTACTS.map((contact) => (
+            <a key={contact.tel} href={`tel:${contact.tel}`}>
+              <span>
+                <strong>{contact.name}</strong>
+                {contact.role && <small>{contact.role}</small>}
+              </span>
+              <b>{contact.display}</b>
+              <Phone size={18} />
+            </a>
+          ))}
+        </div>
         <a className="email-link" href="mailto:events@denverbulldogs.com">events@denverbulldogs.com</a>
       </div>
     </section>

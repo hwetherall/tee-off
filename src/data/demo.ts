@@ -171,6 +171,13 @@ export const SCHEDULE = [
   ["~5:30 pm", "Awards and BBQ dinner"],
 ] as const;
 
+// Day-of phone numbers, in the order a golfer should try them.
+export const CONTACTS = [
+  { name: "Harry Wetherall", role: "App help", display: "720-323-9825", tel: "+17203239825" },
+  { name: "Phil Camping", role: "On the course", display: "970-371-5658", tel: "+19703715658" },
+  { name: "Jay Blistan", role: "Events Chair", display: "203-505-5555", tel: "+12035055555" },
+] as const;
+
 export const CONTESTS = [
   { id: "closest", hole: 2, name: "Closest to the pin", short: "Closest", direction: "low", unit: "in" },
   { id: "speed", hole: 12, name: "Speed hole", short: "Speed", direction: "low", unit: "sec" },
