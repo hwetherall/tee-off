@@ -1200,7 +1200,7 @@ function PhotosScreen({
   );
 }
 
-function InfoScreen({ onClubhouse }: { onClubhouse: (mode: "course" | "bbq") => void }) {
+function InfoScreen({ onClubhouse }: { onClubhouse: (mode: "course") => void }) {
   return (
     <section className="screen info-screen">
       <SectionHeader eyebrow="Event reference" title="Golf day info" />
@@ -1234,8 +1234,8 @@ function InfoScreen({ onClubhouse }: { onClubhouse: (mode: "course" | "bbq") => 
       </div>
       <div className="info-card clubhouse-links">
         <div className="info-card-title"><Tv /><h3>Clubhouse screen</h3></div>
-        <p>Open one of the cast-ready 16:9 views on the clubhouse laptop.</p>
-        <div><button className="outline-button" onClick={() => onClubhouse("course")}>Course view</button><button className="outline-button" onClick={() => onClubhouse("bbq")}>BBQ photos</button></div>
+        <p>Open the cast-ready 16:9 course view on the clubhouse laptop.</p>
+        <div><button className="outline-button" onClick={() => onClubhouse("course")}>Course view</button></div>
       </div>
       <div className="info-card contact-card">
         <div className="info-card-title"><Phone /><h3>Need help?</h3></div>
