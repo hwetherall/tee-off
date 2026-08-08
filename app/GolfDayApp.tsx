@@ -365,6 +365,7 @@ function CardScreen({
     setDraft({ hole: activeHole, strokes: Math.max(1, Math.min(15, draftStrokes + delta)) });
   };
   const [showHistory, setShowHistory] = useState(false);
+  const [phoneOpen, setPhoneOpen] = useState(false);
   const availableStrings = state.envelopes.filter((envelope) => (
     envelope.teamId === currentTeam.id && envelope.collectedAt && !envelope.usedAt
   ));
@@ -455,6 +456,9 @@ function CardScreen({
           <span>
             <strong>Team {currentTeam.id.replace("team-", "")} — ${teamTab} on the tab</strong>
             Harry will text your captain a payment link after the round.
+            <button className="text-button" onClick={() => setPhoneOpen(true)}>
+              {currentTeam.contactPhone ? `Captain’s mobile: ${currentTeam.contactPhone} · Edit` : "Add captain’s mobile"}
+            </button>
           </span>
         </div>
       )}
@@ -504,6 +508,13 @@ function CardScreen({
           ))}
           {completed.length === 0 && <p>No completed holes yet.</p>}
         </div>
+      )}
+      {phoneOpen && (
+        <PhoneModal
+          team={currentTeam}
+          onSave={(phone) => { saveTeamPhone(onState, currentTeam.id, phone); notify("Captain’s number saved"); }}
+          onClose={() => setPhoneOpen(false)}
+        />
       )}
     </section>
   );
@@ -831,6 +842,50 @@ function SplitsBeneficiaryPicker({
   );
 }
 
+function saveTeamPhone(
+  onState: React.Dispatch<React.SetStateAction<AppState>>,
+  teamId: string,
+  phone: string,
+) {
+  onState((current) => ({
+    ...current,
+    teams: current.teams.map((team) => team.id === teamId ? { ...team, contactPhone: phone || null } : team),
+    phoneUpdates: [
+      ...current.phoneUpdates.filter((update) => update.teamId !== teamId),
+      { id: makeId("phone"), teamId, phone },
+    ],
+  }));
+}
+
+// Deliberately no validation: a junk or skipped number is recoverable tonight,
+// a blocked sale is not. Whatever is typed gets saved.
+function PhoneModal({
+  team,
+  onSave,
+  onClose,
+}: {
+  team: Team;
+  onSave: (phone: string) => void;
+  onClose: () => void;
+}) {
+  const [phone, setPhone] = useState(team.contactPhone ?? "");
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="phone-title">
+        <button className="modal-close" onClick={onClose} aria-label="Close"><X /></button>
+        <span className="eyebrow">{team.name}</span>
+        <h2 id="phone-title">Captain’s mobile</h2>
+        <p className="modal-copy">Harry will text this number a payment link for the team tab after the round. One number per team — the captain’s.</p>
+        <label className="field-label">Mobile number
+          <input type="tel" inputMode="tel" autoComplete="tel" placeholder="720-555-0100" value={phone} onChange={(event) => setPhone(event.target.value)} autoFocus />
+        </label>
+        <button className="primary-button" onClick={() => { onSave(phone.trim()); onClose(); }}>Save number</button>
+        <button className="outline-button" onClick={onClose}>Skip for now</button>
+      </div>
+    </div>
+  );
+}
+
 function ShopScreen({
   state,
   currentTeam,
@@ -854,6 +909,7 @@ function ShopScreen({
   const [selfSplitsBeneficiary, setSelfSplitsBeneficiary] = useState("team");
   const [volunteerSplitsBeneficiary, setVolunteerSplitsBeneficiary] = useState("team");
   const [checkingOut, setCheckingOut] = useState(false);
+  const [phoneTeam, setPhoneTeam] = useState<Team | null>(null);
   const confirmationHandled = useRef(false);
   const paymentReady = process.env.NEXT_PUBLIC_SHOP_ENABLED === "true";
   const basketKey = `bulldogs-basket-${currentTeam.id}`;
@@ -959,6 +1015,9 @@ function ShopScreen({
     ));
     setSelfCart(EMPTY_CART);
     notify(`Added to Team ${currentTeam.id.replace("team-", "")}'s tab. Harry will send a payment link after the round.`);
+    // Ask for the captain's number the first time this team uses the tab. The
+    // order above is already saved — dismissing this loses nothing.
+    if (!currentTeam.contactPhone) setPhoneTeam(currentTeam);
   };
 
   const checkout = async () => {
@@ -1023,6 +1082,7 @@ function ShopScreen({
     ));
     setVolunteerCart(EMPTY_CART);
     notify(`$${volunteerTotal} sale saved`);
+    if (!PAYMENTS_ENABLED && !volunteerTeam.contactPhone) setPhoneTeam(volunteerTeam);
   };
 
   const collectEnvelope = (envelope: Envelope) => requestConfirm({
@@ -1141,6 +1201,13 @@ function ShopScreen({
             <p>String creates a collection voucher. Banana Splits numbers keep the selected beneficiary.</p>
           </div>
         </>
+      )}
+      {phoneTeam && (
+        <PhoneModal
+          team={phoneTeam}
+          onSave={(phone) => { saveTeamPhone(onState, phoneTeam.id, phone); notify("Captain’s number saved"); }}
+          onClose={() => setPhoneTeam(null)}
+        />
       )}
     </section>
   );
