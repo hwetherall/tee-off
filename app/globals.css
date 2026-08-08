@@ -2873,3 +2873,56 @@ select:focus-visible {
 .settlement-panel .primary-button {
   width: 100%;
 }
+
+/* Prize hole reminder on the Card tab. Red matches the clubhouse course strip,
+   where prize holes are already called out in red. */
+.prize-hole-alert {
+  min-height: 66px;
+  margin-bottom: 16px;
+  padding: 12px 14px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: white;
+  background: var(--red);
+  border-radius: 10px;
+  box-shadow: var(--shadow);
+}
+
+.prize-hole-alert > svg {
+  flex: 0 0 auto;
+}
+
+.prize-hole-alert > span {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.prize-hole-alert strong {
+  font-size: 14px;
+  line-height: 1.2;
+}
+
+.prize-hole-alert small {
+  margin-top: 2px;
+  color: #ffe2e4;
+  font-size: 11px;
+  line-height: 1.35;
+}
+
+.prize-hole-alert button {
+  flex: 0 0 auto;
+  min-height: 44px;
+  padding: 0 16px;
+  border: 0;
+  border-radius: 8px;
+  color: var(--red-dark);
+  background: white;
+  font-size: 14px;
+  font-weight: 800;
+}
+
+.prize-hole-alert button:active {
+  transform: translateY(1px);
+}
