@@ -282,7 +282,7 @@ function LadderScreen({
     <section className="screen ladder-screen">
       <SectionHeader
         eyebrow="Live ladder"
-        title="Round standings"
+        title="Standings"
         action={
           <ViewModeToggle
             active="phone"
@@ -330,14 +330,18 @@ function CardScreen({
   const activeHole = editHole ?? nextHole ?? null;
   const activeScore = activeHole ? completed.find((score) => score.hole === activeHole) : undefined;
   const par = activeHole ? COURSE.holes[activeHole - 1].par : 0;
-  const [draft, setDraft] = useState(activeScore?.strokes ?? par);
+  // The draft is tagged with the hole it belongs to and falls back to par for any
+  // other hole. Deriving it beats resetting in an effect, which left one frame
+  // showing the previous hole's number after each save.
+  const [draft, setDraft] = useState<{ hole: number; strokes: number } | null>(null);
+  const draftStrokes = draft && draft.hole === activeHole ? draft.strokes : activeScore?.strokes ?? par;
+  const adjustDraft = (delta: number) => {
+    if (!activeHole) return;
+    setDraft({ hole: activeHole, strokes: Math.max(1, Math.min(15, draftStrokes + delta)) });
+  };
   const [showHistory, setShowHistory] = useState(false);
   const [stringUseOpen, setStringUseOpen] = useState(false);
   const [stringAmount, setStringAmount] = useState(Math.min(6, currentTeam.stringInches));
-
-  useEffect(() => {
-    setDraft(activeScore?.strokes ?? par);
-  }, [activeHole, activeScore?.strokes, par]);
 
   const saveScore = () => {
     if (!activeHole) return;
@@ -345,7 +349,7 @@ function CardScreen({
       id: `${currentTeam.id}-h${activeHole}`,
       teamId: currentTeam.id,
       hole: activeHole,
-      strokes: draft,
+      strokes: draftStrokes,
       enteredBy: currentTeam.players[0]?.name ?? currentTeam.name,
       enteredAt: new Date().toISOString(),
       synced: false,
@@ -357,6 +361,7 @@ function CardScreen({
     notify(editHole ? `Hole ${activeHole} corrected` : `Hole ${activeHole} saved`);
     setEditHole(null);
     setShowHistory(false);
+    setDraft(null);
   };
 
   const updateTeamBalance = (kind: "mulligan" | "string", amount: number) => {
@@ -404,9 +409,9 @@ function CardScreen({
             <div className="hole-meta"><span>Par {par}</span><span>{COURSE.holes[activeHole - 1].yards} yd</span></div>
           </div>
           <div className="score-stepper" aria-label={`Score for hole ${activeHole}`}>
-            <button onClick={() => setDraft((value) => Math.max(1, value - 1))} aria-label="Decrease score"><Minus /></button>
-            <div><strong>{draft}</strong><span>{draft - par === 0 ? "Par" : formatRelative(draft - par)}</span></div>
-            <button onClick={() => setDraft((value) => Math.min(15, value + 1))} aria-label="Increase score"><Plus /></button>
+            <button onClick={() => adjustDraft(-1)} aria-label="Decrease score"><Minus /></button>
+            <div><strong>{draftStrokes}</strong><span>{draftStrokes - par === 0 ? "Par" : formatRelative(draftStrokes - par)}</span></div>
+            <button onClick={() => adjustDraft(1)} aria-label="Increase score"><Plus /></button>
           </div>
           <button className="primary-button save-score" onClick={saveScore}>
             {editHole ? `Save correction · hole ${activeHole}` : `Save hole ${activeHole}`}
@@ -477,24 +482,30 @@ function PrizesScreen({
 }) {
   const [selected, setSelected] = useState<ContestId>("closest");
   const [claimOpen, setClaimOpen] = useState(false);
-  const [playerId, setPlayerId] = useState(currentTeam.players[0]?.id ?? "");
+  const [playerChoice, setPlayerChoice] = useState("");
   const [feet, setFeet] = useState("0");
   const [inches, setInches] = useState("0");
   const [mark, setMark] = useState("");
-  const [now, setNow] = useState(Date.now());
+  const [now, setNow] = useState(0);
   const contest = CONTESTS.find((item) => item.id === selected)!;
   const holder = state.claims.find((claim) => claim.contestId === selected);
-  const elapsed = state.timer.elapsedMs + (state.timer.runningSince ? now - state.timer.runningSince : 0);
+  // Derived rather than reset in an effect, so switching team never flashes a
+  // player from the previous group in the picker.
+  const playerId = currentTeam.players.some((player) => player.id === playerChoice)
+    ? playerChoice
+    : currentTeam.players[0]?.id ?? "";
+  const elapsed = state.timer.elapsedMs
+    + (state.timer.runningSince && now ? Math.max(0, now - state.timer.runningSince) : 0);
 
+  // A wall-clock ticker is what effects are for. Seeded once immediately so the
+  // readout does not sit a tick behind after Start.
   useEffect(() => {
     if (!state.timer.runningSince) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setNow(Date.now());
     const interval = window.setInterval(() => setNow(Date.now()), 100);
     return () => window.clearInterval(interval);
   }, [state.timer.runningSince]);
-
-  useEffect(() => {
-    setPlayerId(currentTeam.players[0]?.id ?? "");
-  }, [currentTeam]);
 
   const toggleTimer = () => {
     onState((current) => current.timer.runningSince
@@ -617,7 +628,7 @@ function PrizesScreen({
             <h2 id="claim-title">Claim {contest.short.toLowerCase()}</h2>
             {selected !== "speed" && (
               <label className="field-label">Player
-                <select value={playerId} onChange={(event) => setPlayerId(event.target.value)}>
+                <select value={playerId} onChange={(event) => setPlayerChoice(event.target.value)}>
                   {currentTeam.players.map((player) => <option key={player.id} value={player.id}>{player.name}</option>)}
                 </select>
               </label>
@@ -641,6 +652,10 @@ function PrizesScreen({
     </section>
   );
 }
+
+// Module scope so it is a stable reference: as a value rebuilt each render it
+// made every basket effect re-run on every keystroke.
+const EMPTY_CART = { mulligan: 0, string: 0, splits: 0 } satisfies Record<ProductId, number>;
 
 function orderQuantity(order: Order, productId: ProductId) {
   return order.lines.find((line) => line.productId === productId)?.qty ?? 0;
@@ -728,10 +743,9 @@ function ShopScreen({
   onState: React.Dispatch<React.SetStateAction<AppState>>;
   notify: (message: string) => void;
 }) {
-  const emptyCart = { mulligan: 0, string: 0, splits: 0 } satisfies Record<ProductId, number>;
   const [mode, setMode] = useState<"self" | "volunteer">("self");
-  const [selfCart, setSelfCart] = useState<Record<ProductId, number>>(emptyCart);
-  const [volunteerCart, setVolunteerCart] = useState<Record<ProductId, number>>(emptyCart);
+  const [selfCart, setSelfCart] = useState<Record<ProductId, number>>(EMPTY_CART);
+  const [volunteerCart, setVolunteerCart] = useState<Record<ProductId, number>>(EMPTY_CART);
   const [teamId, setTeamId] = useState(currentTeam.id);
   const [seller, setSeller] = useState("Dan C");
   const [checkingOut, setCheckingOut] = useState(false);
@@ -746,13 +760,17 @@ function ShopScreen({
   const teamEnvelopes = state.envelopes.filter((envelope) => envelope.teamId === currentTeam.id);
   const teamTickets = state.tickets.filter((ticket) => ticket.teamId === currentTeam.id);
 
+  // Restores the basket the golfer left behind when they switch team or come back
+  // from Stripe. localStorage is client-only, so a mount effect is the right home.
   useEffect(() => {
     const saved = window.localStorage.getItem(basketKey);
+    /* eslint-disable react-hooks/set-state-in-effect */
     if (saved) {
-      try { setSelfCart(JSON.parse(saved)); } catch { setSelfCart(emptyCart); }
+      try { setSelfCart(JSON.parse(saved)); } catch { setSelfCart(EMPTY_CART); }
     } else {
-      setSelfCart(emptyCart);
+      setSelfCart(EMPTY_CART);
     }
+    /* eslint-enable react-hooks/set-state-in-effect */
   }, [basketKey]);
 
   useEffect(() => {
@@ -772,6 +790,8 @@ function ShopScreen({
     const sessionId = params.get("session_id");
     if (shopResult !== "success" || !sessionId) return;
     confirmationHandled.current = true;
+    // Reacting to the Stripe redirect in the URL, which is external state.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setCheckingOut(true);
     fetch(`/api/checkout/confirm?session_id=${encodeURIComponent(sessionId)}`)
       .then(async (response) => {
@@ -779,7 +799,7 @@ function ShopScreen({
         if (!response.ok) throw new Error(result.error);
         const order = result.order as Order;
         onState((current) => applyOrder(current, order, result.envelopeIds, result.tickets));
-        setSelfCart(emptyCart);
+        setSelfCart(EMPTY_CART);
         window.localStorage.removeItem(`bulldogs-basket-${order.teamId}`);
         notify("Payment received · items added");
       })
@@ -850,7 +870,7 @@ function ShopScreen({
       Array.from({ length: stringQty }, (_, index) => `envelope-${orderId}-${index + 1}`),
       Array.from({ length: splitsQty }, (_, index) => ({ id: `ticket-${orderId}-${index + 1}`, number: `DB-${stamp}-${String(index + 1).padStart(2, "0")}` })),
     ));
-    setVolunteerCart(emptyCart);
+    setVolunteerCart(EMPTY_CART);
     notify(`$${volunteerTotal} sale saved`);
   };
 
@@ -1202,7 +1222,15 @@ function ClubhouseView({
               <div className="clubhouse-gallery">
                 {gallery.map((photo) => {
                   const team = state.teams.find((item) => item.id === photo.teamId);
-                  return <figure key={photo.id}>{/* eslint-disable-next-line @next/next/no-img-element */}<img src={photo.thumbnail || photo.url || ""} alt="" /><figcaption>{team?.short} · H{photo.hole}</figcaption></figure>;
+                  return (
+                    <figure key={photo.id}>
+                      {/* Sources are local data URIs and Supabase public URLs; the
+                          next/image loader adds nothing here. */}
+                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      <img src={photo.thumbnail || photo.url || ""} alt="" />
+                      <figcaption>{team?.short} · H{photo.hole}</figcaption>
+                    </figure>
+                  );
                 })}
               </div>
             ) : <div className="clubhouse-no-photos"><Camera /><span>Course photos will appear here</span></div>}
@@ -1303,10 +1331,19 @@ export default function GolfDayApp() {
   const [teamModal, setTeamModal] = useState(false);
   const [confirm, setConfirm] = useState<ConfirmOptions | null>(null);
   const [toast, setToast] = useState("");
+  // The sync loop needs the freshest state without re-subscribing every render.
+  // Written in an effect rather than during render so React never sees a ref
+  // mutated mid-render.
   const stateRef = useRef(state);
-  stateRef.current = state;
-
   useEffect(() => {
+    stateRef.current = state;
+  }, [state]);
+
+  // Hydration: localStorage, navigator.onLine and the query string only exist on
+  // the client, so this genuinely belongs in a mount effect. The one cascading
+  // render it costs happens before the golfer sees anything.
+  useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setState(loadState());
     setCurrentTeamId(loadCurrentTeam());
     setOnline(navigator.onLine);
@@ -1359,8 +1396,11 @@ export default function GolfDayApp() {
     }
   }, []);
 
+  // Subscribing to an external system (Supabase) on a 20s heartbeat plus the
+  // browser's online event. The kickoff call is the initial fetch.
   useEffect(() => {
     if (!hydrated) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     sync();
     const interval = window.setInterval(sync, 20_000);
     window.addEventListener("online", sync);

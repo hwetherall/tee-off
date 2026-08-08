@@ -1543,7 +1543,10 @@ select:focus-visible {
   margin: auto;
   padding: 6px 6px env(safe-area-inset-bottom);
   display: grid;
-  grid-template-columns: repeat(6, 1fr);
+  /* Column count follows however many tabs are enabled, so toggling a tab such
+     as Photos never leaves a dead column or wraps an item onto a second row. */
+  grid-auto-flow: column;
+  grid-auto-columns: 1fr;
   background: var(--navy);
   border-top: 4px solid var(--red);
   box-shadow: 0 -10px 24px rgba(13, 30, 72, 0.17);
@@ -1914,11 +1917,6 @@ select:focus-visible {
     scroll-behavior: auto !important;
     transition-duration: 0.01ms !important;
   }
-}
-
-/* Revised six-tab shop and gallery surfaces */
-.bottom-nav {
-  grid-template-columns: repeat(6, 1fr);
 }
 
 .bottom-nav button {
