@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { CATALOG, validateCheckoutLines } from "@/src/lib/shop";
+import { CATALOG, checkoutBeneficiaryValid, validateCheckoutLines } from "@/src/lib/shop";
 
 export async function POST(request: Request) {
   const secret = process.env.STRIPE_SECRET_KEY;
@@ -10,7 +10,6 @@ export async function POST(request: Request) {
 
   let payload: {
     teamId?: string;
-    buyerId?: string;
     lines?: unknown;
   };
   try {
@@ -20,7 +19,7 @@ export async function POST(request: Request) {
   }
 
   const lines = validateCheckoutLines(payload.lines);
-  if (!payload.teamId || !payload.buyerId || !lines) {
+  if (!payload.teamId || !lines || !checkoutBeneficiaryValid(lines, payload.teamId)) {
     return NextResponse.json({ error: "The basket is not valid." }, { status: 400 });
   }
 
@@ -47,13 +46,13 @@ export async function POST(request: Request) {
     })),
     metadata: {
       team_id: payload.teamId,
-      buyer_id: payload.buyerId,
+      buyer_id: payload.teamId,
       lines: JSON.stringify(lines),
     },
     success_url: `${origin}/?shop=success&session_id={CHECKOUT_SESSION_ID}`,
     cancel_url: `${origin}/?shop=cancelled`,
     custom_text: {
-      submit: { message: "Items are added to your team after payment." },
+      submit: { message: "All sales are final. Items are added to your team after payment." },
     },
   });
 

@@ -1006,6 +1006,13 @@ select:focus-visible {
   border-radius: 0 0 14px 14px;
 }
 
+.speed-player-picker {
+  margin-bottom: 10px;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 9px;
+}
+
 .timer-display {
   padding: 14px 3px 18px;
   color: var(--navy);
@@ -2061,6 +2068,22 @@ select:focus-visible {
   background: white;
 }
 
+.sealed-envelope:disabled {
+  cursor: default;
+  opacity: 1;
+}
+
+.sealed-envelope.used {
+  border-color: #8d929e;
+  color: #545a66;
+  background: #eef0f4;
+}
+
+.sealed-envelope.used .envelope-flap {
+  background: #d7d9df;
+  border-color: #a9adb6;
+}
+
 .sealed-envelope.revealing {
   transform: rotateX(12deg) scale(0.98);
   background: #fff4d7;
@@ -2138,13 +2161,71 @@ select:focus-visible {
   gap: 7px;
 }
 
+.ticket-chip {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: white;
+  border-radius: 5px;
+}
+
 .ticket-wallet strong {
   padding: 6px 8px;
   color: var(--navy);
-  background: white;
-  border-radius: 5px;
   font-family: var(--font-scoreboard), sans-serif;
   font-size: 16px;
+}
+
+.ticket-chip small {
+  padding: 0 8px 6px;
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 9px;
+  font-weight: 700;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+.beneficiary-picker {
+  margin: 12px 0;
+  padding: 13px;
+  background: #e4e8f2;
+  border: 1px solid #bcc6df;
+  border-radius: 10px;
+}
+
+.beneficiary-picker small {
+  color: var(--muted);
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0;
+  line-height: 1.35;
+  text-transform: none;
+}
+
+.string-rules-card {
+  min-height: 66px;
+  margin-bottom: 13px;
+  padding: 11px 13px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: #3f300e;
+  background: #fff1c8;
+  border: 1px solid #c9a64c;
+  border-radius: 9px;
+  font-size: 10px;
+  line-height: 1.4;
+}
+
+.string-rules-card > span:last-child {
+  display: flex;
+  flex-direction: column;
+}
+
+.string-rules-card strong {
+  color: #312405;
+  font-size: 12px;
 }
 
 .payment-setup,

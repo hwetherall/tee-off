@@ -148,14 +148,15 @@ default, a confirm button. Once confirmed the hole locks and moves on.
 An "edit previous hole" path is required, because someone will always fumble it.
 Keep it one level deep — a list of completed holes, tap to correct.
 
-Also tracks consumables: mulligans remaining, string remaining (in inches,
-decrementing as they use it).
+Also tracks team consumables: mulligans remaining and collected strings that
+are still available. Each physical string is a single-use item; there is no
+shared inches balance.
 
 ### 3. Prizes
 
-The four prize holes with the current holder and the mark to beat. Claiming is
-open to any player — this is a fundraiser, not a major, and social pressure
-handles the honesty problem better than a permissions model.
+The four prize holes with the current holder and the mark to beat. Each result
+is assigned to a roster player, while the app retains every submitted result
+and derives the current holder.
 
 - Closest to the pin (hole 2) — distance in feet and inches
 - Longest putt (hole 18) — distance in feet
@@ -177,13 +178,12 @@ moving, so it needs a payments provider (Stripe) and receipts.
 What happens after payment matters more than the payment itself:
 
 - **Mulligans** land straight in the team's counter on the Card tab
-- **String extender** creates a sealed envelope the player taps to open. Length
-  is randomised 6–24 inches at the moment of opening and then added to the
-  team's string balance. This mirrors the physical sealed envelope Jay is
-  selling, and the reveal is the single most enjoyable moment in the app —
-  build it properly, with the seal visibly closed until tapped.
-- **50/50 tickets** issue visible ticket numbers so people have something to
-  hold and check against the draw
+- **String** creates a team collection voucher. The team shows it to a
+  volunteer, receives the sealed physical 6–24 inch string, and marks it
+  collected. Opening does not consume it. Using it burns the entire string
+  after a two-step confirmation; it cannot be cut, stretched or reused.
+- **Banana Splits tickets** issue visible ticket numbers assigned either to one
+  selected roster player or to the whole team as a shared split.
 
 The important thing this unlocks: a group on hole 14 who wants a mulligan no
 longer waits for the cart to find them. Expect self-serve to overtake the
@@ -254,15 +254,16 @@ switch, not a redesign.
 ```
 Event    { id, name, date, venue, format, startTime }
 Course   { id, name, par, holes: [{ number, par, yards }] }
-Team     { id, name, short, startHole, players: [Player], mulligans, stringInches }
+Team     { id, name, short, startHole, players: [Player], mulligans }
 Player   { id, name, teamId }
 Score    { teamId, hole, strokes, enteredBy, enteredAt, synced }
-Claim    { contestId, holeNumber, playerName, teamId, mark, unit, claimedAt }
+Claim    { contestId, holeNumber, playerId, playerName, teamId, mark, unit, claimedAt }
 Product  { id, name, price, description, active }
 Order    { id, teamId, buyerId, lines: [{productId, qty}], amount,
            channel: 'self' | 'volunteer', paymentRef, createdAt, synced }
-Envelope { id, orderId, teamId, inches, openedAt }
-Ticket   { id, orderId, teamId, number }
+Envelope { id, orderId, teamId, collectedAt, usedAt }
+Ticket   { id, orderId, teamId, number, beneficiaryType, beneficiaryPlayerId }
+MulliganUse { id, teamId, usedBy, usedAt }
 Photo    { id, teamId, uploaderId, url, hole, takenAt, synced }
 ```
 
@@ -283,8 +284,10 @@ architecture — see below.
   repeat. One score per hole per team.
 - **Mulligans** are a re-hit of any shot. Doesn't change scoring logic; just
   decrement the counter.
-- **String** substitutes for a putt — the team moves the ball up to the length
-  of string they hold and cuts that length off. Track remaining inches.
+- **String** applies when the result of the previous shot is within the string's
+  length. Measure from the lip of the cup to any part of the ball; the previous
+  shot counts. Each string may be used once and may not be cut, modified or
+  stretched.
 - **Ties** resolve on countback: back nine, then last six, then last three,
   then last hole. If still tied at the awards, Jay decides. Build the countback,
   because two committee members arguing over a printed sheet at 5:45 pm is
@@ -378,7 +381,7 @@ wins, and the clubhouse screen is what the committee will remember.
 
 ### Phase 3 — Self-serve shop
 
-Stripe, the basket, the envelope reveal, ticket numbers. Last because it's the
+Stripe, the basket, string collection vouchers, ticket numbers. Last because it's the
 only piece that handles money and therefore the only piece that can go wrong
 expensively. **Do not ship this half-finished.** A broken checkout on the day
 costs the club more than not having one.

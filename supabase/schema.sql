@@ -12,8 +12,9 @@ create table if not exists public.scores (
 
 create table if not exists public.claims (
   id text primary key,
-  contest_id text not null unique,
+  contest_id text not null,
   hole_number smallint not null,
+  player_id text,
   player_name text not null,
   team_id text not null,
   mark numeric not null,
@@ -69,6 +70,15 @@ create table if not exists public.players (
   unique (team_id, position)
 );
 
+alter table public.claims drop constraint if exists claims_contest_id_key;
+alter table public.claims add column if not exists player_id text;
+do $$ begin
+  alter table public.claims
+    add constraint claims_player_id_fkey foreign key (player_id) references public.players(id);
+exception when duplicate_object then null;
+end $$;
+alter table public.claims alter column player_id set not null;
+
 create table if not exists public.orders (
   id text primary key,
   team_id text not null,
@@ -89,14 +99,53 @@ create table if not exists public.envelopes (
   order_id text not null,
   team_id text not null,
   inches smallint check (inches between 6 and 24),
-  opened_at timestamptz
+  opened_at timestamptz,
+  collected_at timestamptz,
+  used_at timestamptz
 );
+
+alter table public.envelopes add column if not exists collected_at timestamptz;
+alter table public.envelopes add column if not exists used_at timestamptz;
+do $$ begin
+  alter table public.envelopes
+    add constraint envelopes_used_after_collection_check check (used_at is null or collected_at is not null);
+exception when duplicate_object then null;
+end $$;
 
 create table if not exists public.tickets (
   id text primary key,
   order_id text not null,
   team_id text not null,
-  number text not null unique
+  number text not null unique,
+  beneficiary_type text not null default 'team' check (beneficiary_type in ('team', 'player')),
+  beneficiary_player_id text references public.players(id),
+  check (
+    (beneficiary_type = 'team' and beneficiary_player_id is null)
+    or (beneficiary_type = 'player' and beneficiary_player_id is not null)
+  )
+);
+
+alter table public.tickets add column if not exists beneficiary_type text not null default 'team';
+alter table public.tickets add column if not exists beneficiary_player_id text references public.players(id);
+do $$ begin
+  alter table public.tickets
+    add constraint tickets_beneficiary_type_check check (beneficiary_type in ('team', 'player'));
+exception when duplicate_object then null;
+end $$;
+do $$ begin
+  alter table public.tickets
+    add constraint tickets_beneficiary_owner_check check (
+      (beneficiary_type = 'team' and beneficiary_player_id is null)
+      or (beneficiary_type = 'player' and beneficiary_player_id is not null)
+    );
+exception when duplicate_object then null;
+end $$;
+
+create table if not exists public.mulligan_uses (
+  id text primary key,
+  team_id text not null references public.teams(id) on delete cascade,
+  used_by text not null,
+  used_at timestamptz not null default now()
 );
 
 create table if not exists public.photos (
@@ -121,6 +170,7 @@ alter table public.players enable row level security;
 alter table public.orders enable row level security;
 alter table public.envelopes enable row level security;
 alter table public.tickets enable row level security;
+alter table public.mulligan_uses enable row level security;
 alter table public.photos enable row level security;
 
 -- ASSUMPTION: The four-digit team code is the app's only entry control for v1.
@@ -133,6 +183,7 @@ drop policy if exists "day-of players" on public.players;
 drop policy if exists "day-of orders" on public.orders;
 drop policy if exists "day-of envelopes" on public.envelopes;
 drop policy if exists "day-of tickets" on public.tickets;
+drop policy if exists "day-of mulligan uses" on public.mulligan_uses;
 drop policy if exists "day-of photos" on public.photos;
 create policy "day-of scores" on public.scores for all to anon using (true) with check (true);
 create policy "day-of claims" on public.claims for all to anon using (true) with check (true);
@@ -142,6 +193,7 @@ create policy "day-of players" on public.players for all to anon using (true) wi
 create policy "day-of orders" on public.orders for all to anon using (true) with check (true);
 create policy "day-of envelopes" on public.envelopes for all to anon using (true) with check (true);
 create policy "day-of tickets" on public.tickets for all to anon using (true) with check (true);
+create policy "day-of mulligan uses" on public.mulligan_uses for all to anon using (true) with check (true);
 create policy "day-of photos" on public.photos for all to anon using (true) with check (true);
 
 insert into storage.buckets (id, name, public)
@@ -218,9 +270,22 @@ begin
   select value, p_order_id, p_team_id, null, null
   from jsonb_array_elements_text(p_envelope_ids);
 
-  insert into public.tickets (id, order_id, team_id, number)
-  select ticket.id, p_order_id, p_team_id, ticket.number
-  from jsonb_to_recordset(p_tickets) as ticket(id text, number text);
+  insert into public.tickets (
+    id, order_id, team_id, number, beneficiary_type, beneficiary_player_id
+  )
+  select
+    ticket.id,
+    p_order_id,
+    p_team_id,
+    ticket.number,
+    ticket.beneficiary_type,
+    ticket.beneficiary_player_id
+  from jsonb_to_recordset(p_tickets) as ticket(
+    id text,
+    number text,
+    beneficiary_type text,
+    beneficiary_player_id text
+  );
 
   update public.teams
   set mulligans = mulligans + p_mulligan_qty

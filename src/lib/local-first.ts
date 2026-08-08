@@ -2,12 +2,14 @@ import { createClient } from "@supabase/supabase-js";
 import {
   INITIAL_CLAIMS,
   INITIAL_ENVELOPES,
+  INITIAL_MULLIGAN_USES,
   INITIAL_ORDERS,
   INITIAL_SCORES,
   INITIAL_TEAMS,
   INITIAL_TICKETS,
   type Claim,
   type Envelope,
+  type MulliganUse,
   type Order,
   type Photo,
   type Score,
@@ -45,6 +47,7 @@ export type AppState = {
   orders: Order[];
   envelopes: Envelope[];
   tickets: Ticket[];
+  mulliganUses: MulliganUse[];
   photos: Photo[];
   photoDeletes: PhotoDelete[];
   timer: TimerState;
@@ -64,7 +67,7 @@ type LegacySale = {
 
 type StoredState = Partial<AppState> & { sales?: LegacySale[]; dirtyTeamIds?: string[] };
 
-const STORAGE_KEY = "bulldogs-golf-day-v2";
+const STORAGE_KEY = "bulldogs-golf-day-v3";
 const TEAM_KEY = "bulldogs-golf-team-v1";
 
 export const INITIAL_STATE: AppState = {
@@ -74,6 +77,7 @@ export const INITIAL_STATE: AppState = {
   orders: INITIAL_ORDERS,
   envelopes: INITIAL_ENVELOPES,
   tickets: INITIAL_TICKETS,
+  mulliganUses: INITIAL_MULLIGAN_USES,
   photos: [],
   photoDeletes: [],
   timer: { runningSince: null, elapsedMs: 0 },
@@ -108,6 +112,7 @@ export function loadState(): AppState {
       orders: parsed.orders ?? migrateSales(parsed.sales),
       envelopes: parsed.envelopes ?? [],
       tickets: parsed.tickets ?? [],
+      mulliganUses: parsed.mulliganUses ?? [],
       photos: parsed.photos ?? [],
       photoDeletes: parsed.photoDeletes ?? [],
       timer: parsed.timer ?? INITIAL_STATE.timer,
@@ -145,6 +150,7 @@ export function pendingCount(state: AppState) {
     + state.orders.filter((item) => !item.synced).length
     + state.envelopes.filter((item) => !item.synced).length
     + state.tickets.filter((item) => !item.synced).length
+    + state.mulliganUses.filter((item) => !item.synced).length
     + state.photos.filter((item) => !item.synced).length
     + state.photoDeletes.length
     + state.balanceDeltas.length;
@@ -164,16 +170,19 @@ function scoreSignature(score: Score) {
   return [score.teamId, score.hole, score.strokes, score.enteredBy, score.enteredAt].join("|");
 }
 function claimSignature(claim: Claim) {
-  return [claim.contestId, claim.holeNumber, claim.playerName, claim.teamId, claim.mark, claim.unit, claim.claimedAt].join("|");
+  return [claim.contestId, claim.holeNumber, claim.playerId, claim.playerName, claim.teamId, claim.mark, claim.unit, claim.claimedAt].join("|");
 }
 function orderSignature(order: Order) {
   return [order.teamId, order.buyerId, JSON.stringify(order.lines), order.amount, order.channel, order.paymentRef, order.createdAt].join("|");
 }
 function envelopeSignature(envelope: Envelope) {
-  return [envelope.orderId, envelope.teamId, envelope.inches, envelope.openedAt].join("|");
+  return [envelope.orderId, envelope.teamId, envelope.inches, envelope.openedAt, envelope.collectedAt, envelope.usedAt].join("|");
 }
 function ticketSignature(ticket: Ticket) {
-  return [ticket.orderId, ticket.teamId, ticket.number].join("|");
+  return [ticket.orderId, ticket.teamId, ticket.number, ticket.beneficiaryType, ticket.beneficiaryPlayerId].join("|");
+}
+function mulliganUseSignature(use: MulliganUse) {
+  return [use.teamId, use.usedBy, use.usedAt].join("|");
 }
 
 export type PushResult = {
@@ -182,6 +191,7 @@ export type PushResult = {
   orders: Map<string, string>;
   envelopes: Map<string, string>;
   tickets: Map<string, string>;
+  mulliganUses: Map<string, string>;
   photos: Map<string, { url: string; storagePath: string }>;
   photoDeletes: string[];
   balanceDeltas: string[];
@@ -194,6 +204,7 @@ function emptyPush(): PushResult {
     orders: new Map(),
     envelopes: new Map(),
     tickets: new Map(),
+    mulliganUses: new Map(),
     photos: new Map(),
     photoDeletes: [],
     balanceDeltas: [],
@@ -239,6 +250,7 @@ export async function pushPending(state: AppState): Promise<PushResult> {
   const pendingOrders = state.orders.filter((order) => !order.synced);
   const pendingEnvelopes = state.envelopes.filter((envelope) => !envelope.synced);
   const pendingTickets = state.tickets.filter((ticket) => !ticket.synced);
+  const pendingMulliganUses = state.mulliganUses.filter((use) => !use.synced);
   const result = emptyPush();
 
   if (pendingScores.length) {
@@ -259,12 +271,13 @@ export async function pushPending(state: AppState): Promise<PushResult> {
       id: claim.id,
       contest_id: claim.contestId,
       hole_number: claim.holeNumber,
+      player_id: claim.playerId,
       player_name: claim.playerName,
       team_id: claim.teamId,
       mark: claim.mark,
       unit: claim.unit,
       claimed_at: claim.claimedAt,
-    })), { onConflict: "contest_id" });
+    })), { onConflict: "id" });
     if (error) throw error;
     pendingClaims.forEach((claim) => result.claims.set(claim.id, claimSignature(claim)));
   }
@@ -291,6 +304,8 @@ export async function pushPending(state: AppState): Promise<PushResult> {
       team_id: envelope.teamId,
       inches: envelope.inches,
       opened_at: envelope.openedAt,
+      collected_at: envelope.collectedAt,
+      used_at: envelope.usedAt,
     })), { onConflict: "id" });
     if (error) throw error;
     pendingEnvelopes.forEach((envelope) => result.envelopes.set(envelope.id, envelopeSignature(envelope)));
@@ -302,9 +317,22 @@ export async function pushPending(state: AppState): Promise<PushResult> {
       order_id: ticket.orderId,
       team_id: ticket.teamId,
       number: ticket.number,
+      beneficiary_type: ticket.beneficiaryType,
+      beneficiary_player_id: ticket.beneficiaryPlayerId,
     })), { onConflict: "id" });
     if (error) throw error;
     pendingTickets.forEach((ticket) => result.tickets.set(ticket.id, ticketSignature(ticket)));
+  }
+
+  if (pendingMulliganUses.length) {
+    const { error } = await supabase.from("mulligan_uses").upsert(pendingMulliganUses.map((use) => ({
+      id: use.id,
+      team_id: use.teamId,
+      used_by: use.usedBy,
+      used_at: use.usedAt,
+    })), { onConflict: "id" });
+    if (error) throw error;
+    pendingMulliganUses.forEach((use) => result.mulliganUses.set(use.id, mulliganUseSignature(use)));
   }
 
   for (const delta of state.balanceDeltas) {
@@ -351,6 +379,7 @@ export type RemoteSnapshot = {
   orders: Order[];
   envelopes: Envelope[];
   tickets: Ticket[];
+  mulliganUses: MulliganUse[];
   photos: Array<Omit<Photo, "mine">>;
   teams: Array<Omit<Team, "players">>;
   playersByTeam: Map<string, Team["players"]>;
@@ -358,18 +387,19 @@ export type RemoteSnapshot = {
 
 export async function pullRemote(): Promise<RemoteSnapshot> {
   if (!supabase) return null;
-  const [scoresResult, claimsResult, ordersResult, envelopesResult, ticketsResult, photosResult, teamsResult, playersResult] = await Promise.all([
+  const [scoresResult, claimsResult, ordersResult, envelopesResult, ticketsResult, mulliganUsesResult, photosResult, teamsResult, playersResult] = await Promise.all([
     supabase.from("scores").select("*"),
     supabase.from("claims").select("*"),
     supabase.from("orders").select("*"),
     supabase.from("envelopes").select("*"),
     supabase.from("tickets").select("*"),
+    supabase.from("mulligan_uses").select("*"),
     supabase.from("photos").select("*"),
     supabase.from("teams").select("*"),
     supabase.from("players").select("*").order("team_id").order("position"),
   ]);
   const error = scoresResult.error ?? claimsResult.error ?? ordersResult.error ?? envelopesResult.error
-    ?? ticketsResult.error ?? photosResult.error ?? teamsResult.error ?? playersResult.error;
+    ?? ticketsResult.error ?? mulliganUsesResult.error ?? photosResult.error ?? teamsResult.error ?? playersResult.error;
   if (error) throw error;
 
   const playersByTeam = new Map<string, Team["players"]>();
@@ -386,7 +416,7 @@ export async function pullRemote(): Promise<RemoteSnapshot> {
     })),
     claims: (claimsResult.data ?? []).map((row) => ({
       id: row.id, contestId: row.contest_id, holeNumber: row.hole_number,
-      playerName: row.player_name, teamId: row.team_id, mark: Number(row.mark),
+      playerId: row.player_id, playerName: row.player_name, teamId: row.team_id, mark: Number(row.mark),
       unit: row.unit, claimedAt: row.claimed_at, synced: true,
     })),
     orders: (ordersResult.data ?? []).map((row) => ({
@@ -396,10 +426,15 @@ export async function pullRemote(): Promise<RemoteSnapshot> {
     })),
     envelopes: (envelopesResult.data ?? []).map((row) => ({
       id: row.id, orderId: row.order_id, teamId: row.team_id, inches: row.inches,
-      openedAt: row.opened_at, synced: true,
+      openedAt: row.opened_at, collectedAt: row.collected_at, usedAt: row.used_at, synced: true,
     })),
     tickets: (ticketsResult.data ?? []).map((row) => ({
-      id: row.id, orderId: row.order_id, teamId: row.team_id, number: row.number, synced: true,
+      id: row.id, orderId: row.order_id, teamId: row.team_id, number: row.number,
+      beneficiaryType: row.beneficiary_type ?? "team", beneficiaryPlayerId: row.beneficiary_player_id,
+      synced: true,
+    })),
+    mulliganUses: (mulliganUsesResult.data ?? []).map((row) => ({
+      id: row.id, teamId: row.team_id, usedBy: row.used_by, usedAt: row.used_at, synced: true,
     })),
     photos: (photosResult.data ?? []).map((row) => ({
       id: row.id, teamId: row.team_id, uploaderId: row.uploader_id, url: row.url,
@@ -446,6 +481,7 @@ export function reconcile(current: AppState, push: PushResult, remote: RemoteSna
   const orders = markSynced(current.orders, push.orders, orderSignature);
   const envelopes = markSynced(current.envelopes, push.envelopes, envelopeSignature);
   const tickets = markSynced(current.tickets, push.tickets, ticketSignature);
+  const mulliganUses = markSynced(current.mulliganUses, push.mulliganUses, mulliganUseSignature);
   const photos = current.photos.map((photo) => {
     const uploaded = push.photos.get(photo.id);
     return uploaded ? { ...photo, ...uploaded, synced: true } : photo;
@@ -460,6 +496,7 @@ export function reconcile(current: AppState, push: PushResult, remote: RemoteSna
     orders,
     envelopes,
     tickets,
+    mulliganUses,
     photos,
     photoDeletes,
     balanceDeltas,
@@ -498,6 +535,7 @@ export function reconcile(current: AppState, push: PushResult, remote: RemoteSna
     orders: mergeById(orders, remote.orders),
     envelopes: mergeById(envelopes, remote.envelopes),
     tickets: mergeById(tickets, remote.tickets),
+    mulliganUses: mergeById(mulliganUses, remote.mulliganUses),
     photos: mergeById(photos, remotePhotos).filter((photo) => !photoDeletes.some((item) => item.id === photo.id)),
     teams: remoteTeams.length ? remoteTeams : base.teams,
   };

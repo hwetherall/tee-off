@@ -37,6 +37,7 @@ export type Claim = {
   id: string;
   contestId: "closest" | "speed" | "drive" | "putt";
   holeNumber: number;
+  playerId: string;
   playerName: string;
   teamId: string;
   mark: number;
@@ -48,6 +49,8 @@ export type Claim = {
 export type OrderLine = {
   productId: "mulligan" | "string" | "splits";
   qty: number;
+  beneficiaryType?: "team" | "player";
+  beneficiaryPlayerId?: string | null;
 };
 
 export type Order = {
@@ -68,6 +71,8 @@ export type Envelope = {
   teamId: string;
   inches: number | null;
   openedAt: string | null;
+  collectedAt: string | null;
+  usedAt: string | null;
   synced: boolean;
 };
 
@@ -76,6 +81,16 @@ export type Ticket = {
   orderId: string;
   teamId: string;
   number: string;
+  beneficiaryType: "team" | "player";
+  beneficiaryPlayerId: string | null;
+  synced: boolean;
+};
+
+export type MulliganUse = {
+  id: string;
+  teamId: string;
+  usedBy: string;
+  usedAt: string;
   synced: boolean;
 };
 
@@ -160,6 +175,7 @@ export const INITIAL_CLAIMS: Claim[] = [];
 export const INITIAL_ORDERS: Order[] = [];
 export const INITIAL_ENVELOPES: Envelope[] = [];
 export const INITIAL_TICKETS: Ticket[] = [];
+export const INITIAL_MULLIGAN_USES: MulliganUse[] = [];
 
 export const SCHEDULE = [
   ["12:00 pm", "Volunteers arrive"],
@@ -186,7 +202,7 @@ export const CONTESTS = [
 ] as const;
 
 export const PRODUCTS = [
-  { id: "mulligan", name: "Mulligan", price: 10, note: "One re-hit" },
-  { id: "string", name: "String", price: 20, note: "Sealed 6–24 in envelope" },
+  { id: "mulligan", name: "Mulligan", price: 10, note: "One team re-hit · final sale" },
+  { id: "string", name: "String", price: 20, note: "One-use sealed 6–24 in string" },
   { id: "splits", name: "Banana Splits", price: 20, note: "Half the pot goes to the winner" },
 ] as const;

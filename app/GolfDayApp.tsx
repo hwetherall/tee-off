@@ -41,6 +41,7 @@ import {
   SCHEDULE,
   type Claim,
   type Envelope,
+  type MulliganUse,
   type Order,
   type OrderLine,
   type Photo,
@@ -170,6 +171,28 @@ function formatMark(claim: Claim) {
   }
   if (claim.unit === "sec") return formatTimer(claim.mark * 1000);
   return `${claim.mark} ${claim.unit}`;
+}
+
+function contestLeader(claims: Claim[], contestId: ContestId) {
+  const contest = CONTESTS.find((item) => item.id === contestId)!;
+  return claims
+    .filter((claim) => claim.contestId === contestId)
+    .reduce<Claim | undefined>((leader, claim) => {
+      if (!leader) return claim;
+      const wins = contest.direction === "low" ? claim.mark < leader.mark : claim.mark > leader.mark;
+      if (wins) return claim;
+      if (claim.mark === leader.mark && claim.claimedAt < leader.claimedAt) return claim;
+      return leader;
+    }, undefined);
+}
+
+function ticketBeneficiaryLabel(
+  ticket: { beneficiaryType: "team" | "player"; beneficiaryPlayerId: string | null; teamId: string },
+  teams: Team[],
+) {
+  const team = teams.find((item) => item.id === ticket.teamId);
+  if (ticket.beneficiaryType === "team") return `Split with ${team?.name ?? "team"}`;
+  return team?.players.find((player) => player.id === ticket.beneficiaryPlayerId)?.name ?? "Assigned player";
 }
 
 function BrandMark({ compact = false }: { compact?: boolean }) {
@@ -341,8 +364,9 @@ function CardScreen({
     setDraft({ hole: activeHole, strokes: Math.max(1, Math.min(15, draftStrokes + delta)) });
   };
   const [showHistory, setShowHistory] = useState(false);
-  const [stringUseOpen, setStringUseOpen] = useState(false);
-  const [stringAmount, setStringAmount] = useState(Math.min(6, currentTeam.stringInches));
+  const availableStrings = state.envelopes.filter((envelope) => (
+    envelope.teamId === currentTeam.id && envelope.collectedAt && !envelope.usedAt
+  ));
 
   const saveScore = () => {
     if (!activeHole) return;
@@ -365,33 +389,53 @@ function CardScreen({
     setDraft(null);
   };
 
-  const updateTeamBalance = (kind: "mulligan" | "string", amount: number) => {
-    const spentMulligans = kind === "mulligan" ? amount : 0;
-    const spentInches = kind === "string" ? amount : 0;
+  const burnMulligan = () => {
+    const usedAt = new Date().toISOString();
+    const use: MulliganUse = {
+      id: makeId("mulligan-use"),
+      teamId: currentTeam.id,
+      usedBy: currentTeam.name,
+      usedAt,
+      synced: false,
+    };
     onState((current) => ({
       ...current,
       teams: current.teams.map((team) => team.id === currentTeam.id
         ? {
           ...team,
-          mulligans: Math.max(0, team.mulligans - spentMulligans),
-          stringInches: Math.max(0, team.stringInches - spentInches),
+          mulligans: Math.max(0, team.mulligans - 1),
         }
         : team),
-      balanceDeltas: [...current.balanceDeltas, makeBalanceDelta(currentTeam.id, -spentMulligans, -spentInches)],
+      mulliganUses: [...current.mulliganUses, use],
+      balanceDeltas: [...current.balanceDeltas, makeBalanceDelta(currentTeam.id, -1, 0)],
     }));
-    notify(kind === "mulligan" ? "Mulligan used" : `${amount} in of string used`);
+    notify("Mulligan used · no refund available");
   };
 
   const useMulligan = () => requestConfirm({
     title: "Use one mulligan?",
-    body: `${currentTeam.name} will have ${Math.max(0, currentTeam.mulligans - 1)} remaining.`,
+    body: `${currentTeam.name} will have ${Math.max(0, currentTeam.mulligans - 1)} remaining. This final-sale credit cannot be restored.`,
     confirmLabel: "Use mulligan",
-    onConfirm: () => updateTeamBalance("mulligan", 1),
+    onConfirm: burnMulligan,
   });
 
   const useString = () => {
-    setStringAmount(Math.min(6, currentTeam.stringInches));
-    setStringUseOpen(true);
+    const string = availableStrings[0];
+    if (!string) return;
+    requestConfirm({
+      title: "Burn this entire string?",
+      body: "Each string may be used only once. It cannot be cut, stretched, reused or restored. Measure from the lip of the cup to any part of the ball.",
+      confirmLabel: "Yes, burn this string",
+      onConfirm: () => {
+        onState((current) => ({
+          ...current,
+          envelopes: current.envelopes.map((envelope) => envelope.id === string.id
+            ? { ...envelope, usedAt: new Date().toISOString(), synced: false }
+            : envelope),
+        }));
+        notify("String burned · previous shot counts");
+      },
+    });
   };
 
   return (
@@ -399,7 +443,7 @@ function CardScreen({
       <SectionHeader eyebrow={`${currentTeam.name} · starts hole ${currentTeam.startHole}`} title="Team card" />
       <div className="balance-strip">
         <div><span>Mulligans</span><strong>{currentTeam.mulligans}</strong></div>
-        <div><span>String</span><strong>{currentTeam.stringInches}<small> in</small></strong></div>
+        <div><span>Strings ready</span><strong>{availableStrings.length}</strong></div>
       </div>
 
       {activeHole ? (
@@ -427,8 +471,8 @@ function CardScreen({
         <button onClick={useMulligan} disabled={currentTeam.mulligans === 0}>
           <RotateCcw /><span>Use mulligan</span><small>{currentTeam.mulligans} left</small>
         </button>
-        <button onClick={useString} disabled={currentTeam.stringInches === 0}>
-          <span className="string-icon">—</span><span>Use string</span><small>{currentTeam.stringInches} in left</small>
+        <button onClick={useString} disabled={availableStrings.length === 0}>
+          <span className="string-icon">—</span><span>Use whole string</span><small>{availableStrings.length} ready</small>
         </button>
       </div>
 
@@ -446,22 +490,6 @@ function CardScreen({
             </button>
           ))}
           {completed.length === 0 && <p>No completed holes yet.</p>}
-        </div>
-      )}
-      {stringUseOpen && (
-        <div className="modal-backdrop" role="presentation">
-          <div className="modal" role="dialog" aria-modal="true" aria-labelledby="string-title">
-            <button className="modal-close" onClick={() => setStringUseOpen(false)} aria-label="Close"><X /></button>
-            <span className="eyebrow">String extender</span>
-            <h2 id="string-title">How much was cut?</h2>
-            <div className="score-stepper string-stepper">
-              <button onClick={() => setStringAmount((value) => Math.max(1, value - 1))} aria-label="Use one inch less"><Minus /></button>
-              <div><strong>{stringAmount}</strong><span>Inches</span></div>
-              <button onClick={() => setStringAmount((value) => Math.min(currentTeam.stringInches, value + 1))} aria-label="Use one inch more"><Plus /></button>
-            </div>
-            <p className="modal-copy">{currentTeam.stringInches - stringAmount} in will remain.</p>
-            <button className="primary-button" onClick={() => { updateTeamBalance("string", stringAmount); setStringUseOpen(false); }}>Use {stringAmount} in of string</button>
-          </div>
         </div>
       )}
     </section>
@@ -483,18 +511,22 @@ function PrizesScreen({
 }) {
   const [selected, setSelected] = useState<ContestId>("closest");
   const [claimOpen, setClaimOpen] = useState(false);
+  const [speedTeamChoice, setSpeedTeamChoice] = useState("");
   const [playerChoice, setPlayerChoice] = useState("");
   const [feet, setFeet] = useState("0");
   const [inches, setInches] = useState("0");
   const [mark, setMark] = useState("");
   const [now, setNow] = useState(0);
   const contest = CONTESTS.find((item) => item.id === selected)!;
-  const holder = state.claims.find((claim) => claim.contestId === selected);
+  const holder = contestLeader(state.claims, selected);
+  const claimTeam = selected === "speed"
+    ? state.teams.find((team) => team.id === speedTeamChoice) ?? currentTeam
+    : currentTeam;
   // Derived rather than reset in an effect, so switching team never flashes a
   // player from the previous group in the picker.
-  const playerId = currentTeam.players.some((player) => player.id === playerChoice)
+  const playerId = claimTeam.players.some((player) => player.id === playerChoice)
     ? playerChoice
-    : currentTeam.players[0]?.id ?? "";
+    : claimTeam.players[0]?.id ?? "";
   const elapsed = state.timer.elapsedMs
     + (state.timer.runningSince && now ? Math.max(0, now - state.timer.runningSince) : 0);
 
@@ -541,18 +573,18 @@ function PrizesScreen({
       return;
     }
     const beatsHolder = !holder || (contest.direction === "low" ? numericMark < holder.mark : numericMark > holder.mark);
-    if (!beatsHolder) {
-      notify("Current lead stands");
-      setClaimOpen(false);
+    const player = claimTeam.players.find((item) => item.id === playerId);
+    if (!player) {
+      notify("Choose a player");
       return;
     }
-    const player = currentTeam.players.find((item) => item.id === playerId);
     const claim: Claim = {
-      id: `claim-${selected}`,
+      id: makeId("claim"),
       contestId: selected,
       holeNumber: contest.hole,
-      playerName: selected === "speed" ? currentTeam.name : player?.name ?? currentTeam.name,
-      teamId: currentTeam.id,
+      playerId: player.id,
+      playerName: player.name,
+      teamId: claimTeam.id,
       mark: numericMark,
       unit: contest.unit,
       claimedAt: new Date().toISOString(),
@@ -560,9 +592,10 @@ function PrizesScreen({
     };
     onState((current) => ({
       ...current,
-      claims: [...current.claims.filter((item) => item.contestId !== selected), claim],
+      claims: [...current.claims, claim],
+      timer: selected === "speed" ? { runningSince: null, elapsedMs: 0 } : current.timer,
     }));
-    notify(`${contest.short} lead updated`);
+    notify(beatsHolder ? `${contest.short} lead updated` : `${contest.short} result saved`);
     setClaimOpen(false);
   };
 
@@ -593,6 +626,18 @@ function PrizesScreen({
 
       {selected === "speed" ? (
         <div className="timer-panel">
+          <div className="speed-player-picker">
+            <label className="field-label">Team
+              <select value={claimTeam.id} onChange={(event) => { setSpeedTeamChoice(event.target.value); setPlayerChoice(""); }}>
+                {state.teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
+              </select>
+            </label>
+            <label className="field-label">Player
+              <select value={playerId} onChange={(event) => setPlayerChoice(event.target.value)}>
+                {claimTeam.players.map((player) => <option key={player.id} value={player.id}>{player.name}</option>)}
+              </select>
+            </label>
+          </div>
           <div className={`timer-display ${state.timer.runningSince ? "running" : ""}`}>{formatTimer(elapsed)}</div>
           <button className={`timer-button ${state.timer.runningSince ? "timer-stop" : "timer-start"}`} onClick={toggleTimer}>
             {state.timer.runningSince ? "Stop" : elapsed > 0 ? "Resume" : "Start"}
@@ -610,7 +655,7 @@ function PrizesScreen({
       <div className="all-prizes">
         <h3>Prize board</h3>
         {CONTESTS.map((item) => {
-          const current = state.claims.find((claim) => claim.contestId === item.id);
+          const current = contestLeader(state.claims, item.id);
           return (
             <button key={item.id} onClick={() => setSelected(item.id)}>
               <span className="mini-hole">{item.hole}</span>
@@ -627,13 +672,13 @@ function PrizesScreen({
             <button className="modal-close" onClick={() => setClaimOpen(false)} aria-label="Close"><X /></button>
             <span className="eyebrow">Hole {contest.hole}</span>
             <h2 id="claim-title">Claim {contest.short.toLowerCase()}</h2>
-            {selected !== "speed" && (
+            {selected !== "speed" ? (
               <label className="field-label">Player
                 <select value={playerId} onChange={(event) => setPlayerChoice(event.target.value)}>
-                  {currentTeam.players.map((player) => <option key={player.id} value={player.id}>{player.name}</option>)}
+                  {claimTeam.players.map((player) => <option key={player.id} value={player.id}>{player.name}</option>)}
                 </select>
               </label>
-            )}
+            ) : <p className="modal-copy">Saving for <strong>{claimTeam.players.find((player) => player.id === playerId)?.name}</strong> · {claimTeam.name}</p>}
             {selected === "closest" ? (
               <div className="split-inputs">
                 <label className="field-label">Feet<input inputMode="numeric" type="number" min="0" value={feet} onChange={(event) => setFeet(event.target.value)} /></label>
@@ -646,7 +691,7 @@ function PrizesScreen({
                 <input inputMode="decimal" type="number" min="0" step="0.1" value={mark} onChange={(event) => setMark(event.target.value)} autoFocus />
               </label>
             )}
-            <button className="primary-button" onClick={submitClaim}>Save leading mark</button>
+            <button className="primary-button" onClick={submitClaim}>Save result</button>
           </div>
         </div>
       )}
@@ -662,32 +707,53 @@ function orderQuantity(order: Order, productId: ProductId) {
   return order.lines.find((line) => line.productId === productId)?.qty ?? 0;
 }
 
+function basketLines(cart: Record<ProductId, number>, splitsBeneficiary: string): OrderLine[] {
+  return PRODUCTS
+    .filter((product) => cart[product.id] > 0)
+    .map((product) => product.id === "splits"
+      ? {
+        productId: product.id,
+        qty: cart[product.id],
+        beneficiaryType: splitsBeneficiary === "team" ? "team" : "player",
+        beneficiaryPlayerId: splitsBeneficiary === "team" ? null : splitsBeneficiary,
+      }
+      : { productId: product.id, qty: cart[product.id] });
+}
+
 function applyOrder(
   current: AppState,
   order: Order,
   envelopeIds: string[],
-  ticketData: Array<{ id: string; number: string }>,
+  ticketData: Array<{
+    id: string;
+    number: string;
+    beneficiaryType: "team" | "player";
+    beneficiaryPlayerId: string | null;
+  }>,
 ) {
   if (current.orders.some((item) => item.id === order.id)) return current;
   const mulligans = orderQuantity(order, "mulligan");
+  const fulfilledServerSide = order.channel === "self";
   const envelopes: Envelope[] = envelopeIds.map((id) => ({
     id,
     orderId: order.id,
     teamId: order.teamId,
     inches: null,
     openedAt: null,
-    synced: false,
+    collectedAt: null,
+    usedAt: null,
+    synced: fulfilledServerSide,
   }));
   const tickets = ticketData.map((ticket) => ({
     ...ticket,
     orderId: order.id,
     teamId: order.teamId,
-    synced: false,
+    synced: fulfilledServerSide,
   }));
-  // A Stripe order is credited server-side by the webhook, so this device shows
-  // the mulligans immediately but must NOT also push an adjustment or the team
-  // gets charged once and credited twice. A volunteer sale never touches the
-  // webhook, so there the device owns the adjustment.
+  // A Stripe order and its items are written server-side by the webhook. The
+  // confirmation copy is display-only; pushing it from the browser could race
+  // the webhook and leave a paid order without its credits. A volunteer sale
+  // never touches the webhook, so there the device owns every pending write.
   const clientOwnsCredit = order.channel === "volunteer";
   return {
     ...current,
@@ -731,26 +797,49 @@ function ProductPicker({
   );
 }
 
+function SplitsBeneficiaryPicker({
+  team,
+  value,
+  onChange,
+}: {
+  team: Team;
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  return (
+    <label className="field-label beneficiary-picker">Banana Splits entry belongs to
+      <select value={value} onChange={(event) => onChange(event.target.value)}>
+        <option value="team">Split with {team.name}</option>
+        {team.players.map((player) => <option key={player.id} value={player.id}>{player.name}</option>)}
+      </select>
+      <small>Applies to every Banana Splits number in this basket.</small>
+    </label>
+  );
+}
+
 function ShopScreen({
   state,
   currentTeam,
   online,
   onState,
   notify,
+  requestConfirm,
 }: {
   state: AppState;
   currentTeam: Team;
   online: boolean;
   onState: React.Dispatch<React.SetStateAction<AppState>>;
   notify: (message: string) => void;
+  requestConfirm: (options: ConfirmOptions) => void;
 }) {
   const [mode, setMode] = useState<"self" | "volunteer">("self");
   const [selfCart, setSelfCart] = useState<Record<ProductId, number>>(EMPTY_CART);
   const [volunteerCart, setVolunteerCart] = useState<Record<ProductId, number>>(EMPTY_CART);
   const [teamId, setTeamId] = useState(currentTeam.id);
   const [seller, setSeller] = useState("Dan C");
+  const [selfSplitsBeneficiary, setSelfSplitsBeneficiary] = useState("team");
+  const [volunteerSplitsBeneficiary, setVolunteerSplitsBeneficiary] = useState("team");
   const [checkingOut, setCheckingOut] = useState(false);
-  const [revealing, setRevealing] = useState<string | null>(null);
   const confirmationHandled = useRef(false);
   const paymentReady = process.env.NEXT_PUBLIC_SHOP_ENABLED === "true";
   const basketKey = `bulldogs-basket-${currentTeam.id}`;
@@ -760,6 +849,15 @@ function ShopScreen({
   const splitsTotal = state.orders.reduce((sum, order) => sum + orderQuantity(order, "splits") * 20, 0);
   const teamEnvelopes = state.envelopes.filter((envelope) => envelope.teamId === currentTeam.id);
   const teamTickets = state.tickets.filter((ticket) => ticket.teamId === currentTeam.id);
+  const volunteerTeam = state.teams.find((team) => team.id === teamId) ?? currentTeam;
+  const selfBeneficiary = selfSplitsBeneficiary === "team"
+    || currentTeam.players.some((player) => player.id === selfSplitsBeneficiary)
+    ? selfSplitsBeneficiary
+    : "team";
+  const volunteerBeneficiary = volunteerSplitsBeneficiary === "team"
+    || volunteerTeam.players.some((player) => player.id === volunteerSplitsBeneficiary)
+    ? volunteerSplitsBeneficiary
+    : "team";
 
   // Restores the basket the golfer left behind when they switch team or come back
   // from Stripe. localStorage is client-only, so a mount effect is the right home.
@@ -827,15 +925,14 @@ function ShopScreen({
       notify("Payments are not connected yet");
       return;
     }
-    const lines: OrderLine[] = PRODUCTS.filter((product) => selfCart[product.id] > 0)
-      .map((product) => ({ productId: product.id, qty: selfCart[product.id] }));
+    const lines = basketLines(selfCart, selfBeneficiary);
     if (!lines.length) return;
     setCheckingOut(true);
     try {
       const response = await fetch("/api/checkout", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ teamId: currentTeam.id, buyerId: currentTeam.players[0]?.id, lines }),
+        body: JSON.stringify({ teamId: currentTeam.id, lines }),
       });
       const result = await response.json();
       if (!response.ok || !result.url) throw new Error(result.error);
@@ -849,8 +946,7 @@ function ShopScreen({
   const saveVolunteerOrder = () => {
     if (!volunteerTotal) return;
     const orderId = makeId("order");
-    const lines: OrderLine[] = PRODUCTS.filter((product) => volunteerCart[product.id] > 0)
-      .map((product) => ({ productId: product.id, qty: volunteerCart[product.id] }));
+    const lines = basketLines(volunteerCart, volunteerBeneficiary);
     const order: Order = {
       id: orderId,
       teamId,
@@ -869,33 +965,31 @@ function ShopScreen({
       current,
       order,
       Array.from({ length: stringQty }, (_, index) => `envelope-${orderId}-${index + 1}`),
-      Array.from({ length: splitsQty }, (_, index) => ({ id: `ticket-${orderId}-${index + 1}`, number: `DB-${stamp}-${String(index + 1).padStart(2, "0")}` })),
+      Array.from({ length: splitsQty }, (_, index) => ({
+        id: `ticket-${orderId}-${index + 1}`,
+        number: `DB-${stamp}-${String(index + 1).padStart(2, "0")}`,
+        beneficiaryType: volunteerBeneficiary === "team" ? "team" as const : "player" as const,
+        beneficiaryPlayerId: volunteerBeneficiary === "team" ? null : volunteerBeneficiary,
+      })),
     ));
     setVolunteerCart(EMPTY_CART);
     notify(`$${volunteerTotal} sale saved`);
   };
 
-  const openEnvelope = (envelope: Envelope) => {
-    if (envelope.openedAt) return;
-    const random = new Uint32Array(1);
-    crypto.getRandomValues(random);
-    const inches = 6 + (random[0] % 19);
-    setRevealing(envelope.id);
-    window.setTimeout(() => {
+  const collectEnvelope = (envelope: Envelope) => requestConfirm({
+    title: "Collect this string?",
+    body: "Show this voucher to the volunteer first. Confirm only after the sealed physical string has been handed to your team.",
+    confirmLabel: "String received",
+    onConfirm: () => {
       onState((current) => ({
         ...current,
         envelopes: current.envelopes.map((item) => item.id === envelope.id
-          ? { ...item, inches, openedAt: new Date().toISOString(), synced: false }
+          ? { ...item, collectedAt: new Date().toISOString(), synced: false }
           : item),
-        teams: current.teams.map((team) => team.id === envelope.teamId
-          ? { ...team, stringInches: team.stringInches + inches }
-          : team),
-        balanceDeltas: [...current.balanceDeltas, makeBalanceDelta(envelope.teamId, 0, inches)],
       }));
-      setRevealing(null);
-      notify(`${inches} in of string added`);
-    }, 850);
-  };
+      notify("String collected · ready to use once");
+    },
+  });
 
   return (
     <section className="screen shop-screen">
@@ -911,20 +1005,41 @@ function ShopScreen({
 
       {mode === "self" ? (
         <>
+          <div className="string-rules-card">
+            <span className="string-icon">—</span>
+            <span><strong>String is single-use</strong>Measure from the lip of the cup to any part of the ball. Do not cut, stretch or reuse it.</span>
+          </div>
           {(teamEnvelopes.length > 0 || teamTickets.length > 0) && (
             <div className="my-purchases">
               <h3>Your team’s items</h3>
               {teamEnvelopes.map((envelope) => (
-                <button key={envelope.id} className={`sealed-envelope ${envelope.openedAt ? "opened" : ""} ${revealing === envelope.id ? "revealing" : ""}`} onClick={() => openEnvelope(envelope)}>
+                <button
+                  key={envelope.id}
+                  className={`sealed-envelope ${envelope.collectedAt ? "opened" : ""} ${envelope.usedAt ? "used" : ""}`}
+                  onClick={() => collectEnvelope(envelope)}
+                  disabled={Boolean(envelope.collectedAt)}
+                >
                   <span className="envelope-flap"><i /></span>
-                  <span>{envelope.openedAt ? `${envelope.inches} inches` : "Sealed string envelope"}<small>{envelope.openedAt ? "Added to your Card" : "Tap to break the seal"}</small></span>
-                  {envelope.openedAt ? <ShieldCheck /> : <LockKeyhole />}
+                  <span>
+                    {envelope.usedAt ? "String used" : envelope.collectedAt ? "Physical string ready" : "String collection voucher"}
+                    <small>{envelope.usedAt
+                      ? `Burned ${new Date(envelope.usedAt).toLocaleString()}`
+                      : envelope.collectedAt
+                        ? "Available on your Card · use whole once"
+                        : "Show volunteer, then tap to confirm collection"}</small>
+                  </span>
+                  {envelope.collectedAt ? <ShieldCheck /> : <LockKeyhole />}
                 </button>
               ))}
               {teamTickets.length > 0 && (
                 <div className="ticket-wallet">
                   <span>Banana Splits numbers</span>
-                  <div>{teamTickets.map((ticket) => <strong key={ticket.id}>{ticket.number}</strong>)}</div>
+                  <div>{teamTickets.map((ticket) => (
+                    <span className="ticket-chip" key={ticket.id}>
+                      <strong>{ticket.number}</strong>
+                      <small>{ticketBeneficiaryLabel(ticket, state.teams)}</small>
+                    </span>
+                  ))}</div>
                 </div>
               )}
             </div>
@@ -932,6 +1047,9 @@ function ShopScreen({
           {!paymentReady && <div className="payment-setup"><LockKeyhole /><span><strong>Payments need setup</strong>Connect the club’s Stripe account before enabling checkout.</span></div>}
           {!online && <div className="no-signal-shop"><WifiOff /><span>No signal here. Your basket stays put; try again near the clubhouse or flag down the cart.</span></div>}
           <ProductPicker cart={selfCart} onAdjust={adjustSelf} />
+          {selfCart.splits > 0 && (
+            <SplitsBeneficiaryPicker team={currentTeam} value={selfBeneficiary} onChange={setSelfSplitsBeneficiary} />
+          )}
           {/* The pay bar only pins itself once there is something to pay for.
               An empty basket used to float a 194px card over two of the three
               products, so you had to scroll to discover most of the shop. */}
@@ -953,16 +1071,19 @@ function ShopScreen({
               <select value={seller} onChange={(event) => setSeller(event.target.value)}><option>Dan C</option><option>Marcus S</option></select>
             </label>
             <label className="field-label">Assign to
-              <select value={teamId} onChange={(event) => setTeamId(event.target.value)}>
+              <select value={teamId} onChange={(event) => { setTeamId(event.target.value); setVolunteerSplitsBeneficiary("team"); }}>
                 {state.teams.map((team) => <option key={team.id} value={team.id}>{team.name}</option>)}
               </select>
             </label>
           </div>
           <ProductPicker cart={volunteerCart} onAdjust={adjustVolunteer} />
+          {volunteerCart.splits > 0 && (
+            <SplitsBeneficiaryPicker team={volunteerTeam} value={volunteerBeneficiary} onChange={setVolunteerSplitsBeneficiary} />
+          )}
           <div className="sale-checkout">
             <div><span>Sale total</span><strong>${volunteerTotal}</strong></div>
             <button className="primary-button" disabled={volunteerTotal === 0} onClick={saveVolunteerOrder}>Save ${volunteerTotal} sale</button>
-            <p>String creates a sealed envelope. Banana Splits numbers appear for the assigned team.</p>
+            <p>String creates a collection voucher. Banana Splits numbers keep the selected beneficiary.</p>
           </div>
         </>
       )}
@@ -1470,7 +1591,7 @@ export default function GolfDayApp() {
           {tab === "ladder" && <LadderScreen state={state} currentTeamId={currentTeam.id} onClubhouse={() => openClubhouse("course")} />}
           {tab === "card" && <CardScreen state={state} currentTeam={currentTeam} onState={setState} notify={notify} requestConfirm={setConfirm} />}
           {tab === "prizes" && <PrizesScreen state={state} currentTeam={currentTeam} onState={setState} notify={notify} requestConfirm={setConfirm} />}
-          {tab === "shop" && <ShopScreen state={state} currentTeam={currentTeam} online={online} onState={setState} notify={notify} />}
+          {tab === "shop" && <ShopScreen state={state} currentTeam={currentTeam} online={online} onState={setState} notify={notify} requestConfirm={setConfirm} />}
           {PHOTOS_TAB_ENABLED && tab === "photos" && <PhotosScreen state={state} currentTeam={currentTeam} onState={setState} notify={notify} requestConfirm={setConfirm} />}
           {tab === "info" && <InfoScreen onClubhouse={openClubhouse} />}
         </div>

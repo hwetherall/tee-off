@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { checkoutTotalCents, parseCheckoutLines, ticketPrefix } from "@/src/lib/shop";
+import { checkoutBeneficiaryValid, checkoutTotalCents, parseCheckoutLines, ticketPrefix } from "@/src/lib/shop";
 
 export const runtime = "nodejs";
 
@@ -41,7 +41,8 @@ async function fulfillCheckout(
   const teamId = session.metadata?.team_id;
   const buyerId = session.metadata?.buyer_id;
   const lines = parseCheckoutLines(session.metadata?.lines);
-  if (!teamId || !buyerId || !lines || session.currency !== "usd" || session.amount_total === null) {
+  if (!teamId || !buyerId || !lines || !checkoutBeneficiaryValid(lines, teamId)
+    || session.currency !== "usd" || session.amount_total === null) {
     throw new Error("Checkout Session metadata is invalid.");
   }
 
@@ -54,7 +55,8 @@ async function fulfillCheckout(
   const orderId = `order-${session.id}`;
   const mulliganQty = lines.find((line) => line.productId === "mulligan")?.qty ?? 0;
   const stringQty = lines.find((line) => line.productId === "string")?.qty ?? 0;
-  const splitsQty = lines.find((line) => line.productId === "splits")?.qty ?? 0;
+  const splitsLine = lines.find((line) => line.productId === "splits");
+  const splitsQty = splitsLine?.qty ?? 0;
   const prefix = ticketPrefix(session.id);
 
   const { data, error } = await supabase.rpc("fulfill_stripe_checkout", {
@@ -70,6 +72,8 @@ async function fulfillCheckout(
     p_tickets: Array.from({ length: splitsQty }, (_, index) => ({
       id: `ticket-${session.id}-${index + 1}`,
       number: `DB-${prefix}-${String(index + 1).padStart(2, "0")}`,
+      beneficiary_type: splitsLine?.beneficiaryType ?? "team",
+      beneficiary_player_id: splitsLine?.beneficiaryPlayerId ?? null,
     })),
   });
   if (error) throw error;
