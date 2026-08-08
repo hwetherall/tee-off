@@ -842,6 +842,38 @@ function SplitsBeneficiaryPicker({
   );
 }
 
+// Plain text on purpose: file downloads are unreliable on iOS Safari, so the
+// organiser copies this list into an email or note before leaving the course.
+function settlementText(state: AppState) {
+  const lines: string[] = [`Bulldogs Golf Day — team tabs (${EVENT.date})`, ""];
+  let grand = 0;
+  for (const team of state.teams) {
+    const orders = state.orders.filter((order) => order.teamId === team.id && !order.paymentRef);
+    if (!orders.length) continue;
+    const counts = new Map<string, { qty: number; amount: number }>();
+    let total = 0;
+    for (const order of orders) {
+      total += order.amount;
+      for (const line of order.lines) {
+        const product = PRODUCTS.find((item) => item.id === line.productId);
+        const entry = counts.get(line.productId) ?? { qty: 0, amount: 0 };
+        entry.qty += line.qty;
+        entry.amount += line.qty * (product?.price ?? 0);
+        counts.set(line.productId, entry);
+      }
+    }
+    grand += total;
+    lines.push(`Team ${team.id.replace("team-", "")} (${team.name}) — ${team.contactPhone || "no number yet"}`);
+    counts.forEach((entry, productId) => {
+      const product = PRODUCTS.find((item) => item.id === productId);
+      lines.push(`  ${entry.qty} x ${product?.name ?? productId} — $${entry.amount}`);
+    });
+    lines.push(`  Tab total: $${total}`, "");
+  }
+  lines.push(`GRAND TOTAL: $${grand}`);
+  return lines.join("\n");
+}
+
 function saveTeamPhone(
   onState: React.Dispatch<React.SetStateAction<AppState>>,
   teamId: string,
@@ -910,6 +942,7 @@ function ShopScreen({
   const [volunteerSplitsBeneficiary, setVolunteerSplitsBeneficiary] = useState("team");
   const [checkingOut, setCheckingOut] = useState(false);
   const [phoneTeam, setPhoneTeam] = useState<Team | null>(null);
+  const [showSettlement, setShowSettlement] = useState(false);
   const confirmationHandled = useRef(false);
   const paymentReady = process.env.NEXT_PUBLIC_SHOP_ENABLED === "true";
   const basketKey = `bulldogs-basket-${currentTeam.id}`;
@@ -1200,6 +1233,32 @@ function ShopScreen({
             <button className="primary-button" disabled={volunteerTotal === 0} onClick={saveVolunteerOrder}>Save ${volunteerTotal} sale</button>
             <p>String creates a collection voucher. Banana Splits numbers keep the selected beneficiary.</p>
           </div>
+          {!PAYMENTS_ENABLED && (
+            <>
+              <button className="history-toggle settlement-toggle" onClick={() => setShowSettlement((value) => !value)}>
+                <span><BadgeDollarSign size={18} /> Settlement list · organiser</span>
+                <ChevronDown className={showSettlement ? "rotated" : ""} />
+              </button>
+              {showSettlement && (
+                <div className="settlement-panel">
+                  <pre className="settlement-text">{settlementText(state)}</pre>
+                  <button
+                    className="primary-button"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(settlementText(state));
+                        notify("Tab list copied");
+                      } catch {
+                        notify("Copy blocked — long-press the list and copy it");
+                      }
+                    }}
+                  >
+                    Copy tab list
+                  </button>
+                </div>
+              )}
+            </>
+          )}
         </>
       )}
       {phoneTeam && (
