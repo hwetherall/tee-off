@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { CATALOG, checkoutBeneficiaryValid, validateCheckoutLines } from "@/src/lib/shop";
+import { CATALOG, PAYMENTS_ENABLED, checkoutBeneficiaryValid, validateCheckoutLines } from "@/src/lib/shop";
 
 export async function POST(request: Request) {
+  if (!PAYMENTS_ENABLED) {
+    return NextResponse.json({ error: "Card payments are paused today. Purchases go on the team tab." }, { status: 503 });
+  }
   const secret = process.env.STRIPE_SECRET_KEY;
   if (!secret || process.env.NEXT_PUBLIC_SHOP_ENABLED !== "true") {
     return NextResponse.json({ error: "Payments are not connected yet." }, { status: 503 });

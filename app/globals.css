@@ -2845,3 +2845,31 @@ select:focus-visible {
     gap: 7px;
   }
 }
+
+/* Payments-down settlement export: plain text the organiser copies into an
+   email or note before leaving the course. */
+.settlement-toggle {
+  margin-top: 8px;
+}
+
+.settlement-panel {
+  margin-top: 8px;
+  padding: 13px;
+  background: var(--paper);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+}
+
+.settlement-panel .settlement-text {
+  margin: 0 0 12px;
+  overflow-x: auto;
+  user-select: all;
+  -webkit-user-select: all;
+  font-size: 12px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.settlement-panel .primary-button {
+  width: 100%;
+}

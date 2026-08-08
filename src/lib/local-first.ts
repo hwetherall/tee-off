@@ -40,6 +40,14 @@ export type BalanceDelta = {
   stringInches: number;
 };
 
+// Captain phone numbers queue like any other offline write. Last write wins —
+// one number per team — and a failed upload must never block order syncing.
+export type PhoneUpdate = {
+  id: string;
+  teamId: string;
+  phone: string;
+};
+
 export type AppState = {
   teams: Team[];
   scores: Score[];
@@ -52,6 +60,7 @@ export type AppState = {
   photoDeletes: PhotoDelete[];
   timer: TimerState;
   balanceDeltas: BalanceDelta[];
+  phoneUpdates: PhoneUpdate[];
 };
 
 type LegacySale = {
@@ -82,6 +91,7 @@ export const INITIAL_STATE: AppState = {
   photoDeletes: [],
   timer: { runningSince: null, elapsedMs: 0 },
   balanceDeltas: [],
+  phoneUpdates: [],
 };
 
 function migrateSales(sales: LegacySale[] = []): Order[] {
@@ -117,6 +127,7 @@ export function loadState(): AppState {
       photoDeletes: parsed.photoDeletes ?? [],
       timer: parsed.timer ?? INITIAL_STATE.timer,
       balanceDeltas: parsed.balanceDeltas ?? [],
+      phoneUpdates: parsed.phoneUpdates ?? [],
     };
   } catch {
     return INITIAL_STATE;
@@ -153,7 +164,8 @@ export function pendingCount(state: AppState) {
     + state.mulliganUses.filter((item) => !item.synced).length
     + state.photos.filter((item) => !item.synced).length
     + state.photoDeletes.length
-    + state.balanceDeltas.length;
+    + state.balanceDeltas.length
+    + state.phoneUpdates.length;
 }
 
 export function makeBalanceDelta(teamId: string, mulligans: number, stringInches: number): BalanceDelta {
@@ -195,6 +207,7 @@ export type PushResult = {
   photos: Map<string, { url: string; storagePath: string }>;
   photoDeletes: string[];
   balanceDeltas: string[];
+  phoneUpdates: string[];
 };
 
 function emptyPush(): PushResult {
@@ -208,6 +221,7 @@ function emptyPush(): PushResult {
     photos: new Map(),
     photoDeletes: [],
     balanceDeltas: [],
+    phoneUpdates: [],
   };
 }
 
@@ -339,6 +353,16 @@ export async function pushPending(state: AppState): Promise<PushResult> {
     if (await applyBalanceDelta(delta)) result.balanceDeltas.push(delta.id);
   }
 
+  // Deliberately does not throw: if the contact_phone column is missing or the
+  // write fails, the update stays pending and everything else keeps syncing.
+  for (const update of state.phoneUpdates) {
+    const { error } = await supabase
+      .from("teams")
+      .update({ contact_phone: update.phone || null })
+      .eq("id", update.teamId);
+    if (!error) result.phoneUpdates.push(update.id);
+  }
+
   for (const deletion of state.photoDeletes) {
     if (deletion.storagePath) await supabase.storage.from("photos").remove([deletion.storagePath]);
     const { error } = await supabase.from("photos").delete().eq("id", deletion.id);
@@ -444,6 +468,7 @@ export async function pullRemote(): Promise<RemoteSnapshot> {
     teams: (teamsResult.data ?? []).map((row) => ({
       id: row.id, name: row.name, short: row.short, code: row.access_code,
       startHole: row.start_hole, mulligans: row.mulligans, stringInches: row.string_inches,
+      contactPhone: row.contact_phone ?? null,
     })),
     playersByTeam,
   };
@@ -475,6 +500,7 @@ function mergeById<T extends { id: string; synced: boolean }>(local: T[], remote
 export function reconcile(current: AppState, push: PushResult, remote: RemoteSnapshot): AppState {
   const appliedDeltas = new Set(push.balanceDeltas);
   const deletedPhotos = new Set(push.photoDeletes);
+  const appliedPhones = new Set(push.phoneUpdates);
 
   const scores = markSynced(current.scores, push.scores, scoreSignature);
   const claims = markSynced(current.claims, push.claims, claimSignature);
@@ -488,6 +514,7 @@ export function reconcile(current: AppState, push: PushResult, remote: RemoteSna
   });
   const balanceDeltas = current.balanceDeltas.filter((delta) => !appliedDeltas.has(delta.id));
   const photoDeletes = current.photoDeletes.filter((item) => !deletedPhotos.has(item.id));
+  const phoneUpdates = current.phoneUpdates.filter((update) => !appliedPhones.has(update.id));
 
   const base: AppState = {
     ...current,
@@ -500,6 +527,7 @@ export function reconcile(current: AppState, push: PushResult, remote: RemoteSna
     photos,
     photoDeletes,
     balanceDeltas,
+    phoneUpdates,
   };
 
   if (!remote) return base;
@@ -513,6 +541,10 @@ export function reconcile(current: AppState, push: PushResult, remote: RemoteSna
     totals.stringInches += delta.stringInches;
     pendingByTeam.set(delta.teamId, totals);
   }
+  // A phone number typed on this device shows immediately, even before the
+  // upload lands or if the remote column is missing.
+  const pendingPhoneByTeam = new Map<string, string>();
+  for (const update of phoneUpdates) pendingPhoneByTeam.set(update.teamId, update.phone);
   const remoteTeams: Team[] = remote.teams.map((row) => {
     const pending = pendingByTeam.get(row.id);
     return {
@@ -520,6 +552,7 @@ export function reconcile(current: AppState, push: PushResult, remote: RemoteSna
       players: remote.playersByTeam.get(row.id) ?? [],
       mulligans: Math.max(0, row.mulligans + (pending?.mulligans ?? 0)),
       stringInches: Math.max(0, row.stringInches + (pending?.stringInches ?? 0)),
+      contactPhone: pendingPhoneByTeam.get(row.id) ?? row.contactPhone ?? null,
     };
   });
 

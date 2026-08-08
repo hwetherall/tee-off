@@ -158,6 +158,10 @@ create table if not exists public.photos (
   taken_at timestamptz not null default now()
 );
 
+-- Captain's mobile for settling the team tab (payments-down IOU day).
+-- Nullable and additive on purpose; already applied by hand on 8 Aug.
+alter table public.teams add column if not exists contact_phone text;
+
 alter table public.teams add column if not exists short text;
 update public.teams set short = upper(left(replace(name, ' ', ''), 4)) where short is null;
 alter table public.teams alter column short set not null;

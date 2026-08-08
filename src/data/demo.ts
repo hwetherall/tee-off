@@ -15,6 +15,9 @@ export type Team = {
   players: Player[];
   mulligans: number;
   stringInches: number;
+  // Captain's mobile for settling the team tab. Optional and loosely typed:
+  // the column was added day-of and generated types were never refreshed.
+  contactPhone?: string | null;
 };
 
 export type Hole = {

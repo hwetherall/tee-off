@@ -1,7 +1,7 @@
 import { createClient } from "@supabase/supabase-js";
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { checkoutBeneficiaryValid, checkoutTotalCents, parseCheckoutLines, ticketPrefix } from "@/src/lib/shop";
+import { PAYMENTS_ENABLED, checkoutBeneficiaryValid, checkoutTotalCents, parseCheckoutLines, ticketPrefix } from "@/src/lib/shop";
 
 export const runtime = "nodejs";
 
@@ -82,6 +82,9 @@ async function fulfillCheckout(
 }
 
 export async function POST(request: Request) {
+  if (!PAYMENTS_ENABLED) {
+    return NextResponse.json({ error: "Card payments are paused today." }, { status: 503 });
+  }
   const config = serverConfig();
   if (!config) {
     return NextResponse.json({ error: "Webhook is not configured." }, { status: 503 });

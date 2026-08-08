@@ -1,8 +1,11 @@
 import { NextResponse } from "next/server";
 import Stripe from "stripe";
-import { checkoutBeneficiaryValid, checkoutTotalCents, parseCheckoutLines, ticketPrefix } from "@/src/lib/shop";
+import { PAYMENTS_ENABLED, checkoutBeneficiaryValid, checkoutTotalCents, parseCheckoutLines, ticketPrefix } from "@/src/lib/shop";
 
 export async function GET(request: Request) {
+  if (!PAYMENTS_ENABLED) {
+    return NextResponse.json({ error: "Card payments are paused today." }, { status: 503 });
+  }
   const secret = process.env.STRIPE_SECRET_KEY;
   const sessionId = new URL(request.url).searchParams.get("session_id");
   if (!secret || !sessionId) {

@@ -1,3 +1,8 @@
+// Stripe paused the account on the morning of the golf day. While this is
+// false, purchases become IOUs on the team's tab and no Stripe code runs.
+// Flip back to true when the account is restored.
+export const PAYMENTS_ENABLED = false;
+
 export const CATALOG = {
   mulligan: { name: "Mulligan", description: "One team re-hit · final sale", unitAmount: 1000 },
   string: { name: "String", description: "One-use sealed 6–24 inch string", unitAmount: 2000 },

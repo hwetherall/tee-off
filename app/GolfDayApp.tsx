@@ -48,6 +48,7 @@ import {
   type Score,
   type Team,
 } from "@/src/data/demo";
+import { PAYMENTS_ENABLED } from "@/src/lib/shop";
 import {
   INITIAL_STATE,
   loadCurrentTeam,
@@ -364,9 +365,13 @@ function CardScreen({
     setDraft({ hole: activeHole, strokes: Math.max(1, Math.min(15, draftStrokes + delta)) });
   };
   const [showHistory, setShowHistory] = useState(false);
+  const [phoneOpen, setPhoneOpen] = useState(false);
   const availableStrings = state.envelopes.filter((envelope) => (
     envelope.teamId === currentTeam.id && envelope.collectedAt && !envelope.usedAt
   ));
+  const teamTab = state.orders
+    .filter((order) => order.teamId === currentTeam.id && !order.paymentRef)
+    .reduce((sum, order) => sum + order.amount, 0);
 
   const saveScore = () => {
     if (!activeHole) return;
@@ -445,6 +450,18 @@ function CardScreen({
         <div><span>Mulligans</span><strong>{currentTeam.mulligans}</strong></div>
         <div><span>Strings ready</span><strong>{availableStrings.length}</strong></div>
       </div>
+      {!PAYMENTS_ENABLED && (
+        <div className="volunteer-note">
+          <BadgeDollarSign />
+          <span>
+            <strong>Team {currentTeam.id.replace("team-", "")} — ${teamTab} on the tab</strong>
+            Harry will text your captain a payment link after the round.
+            <button className="text-button" onClick={() => setPhoneOpen(true)}>
+              {currentTeam.contactPhone ? `Captain’s mobile: ${currentTeam.contactPhone} · Edit` : "Add captain’s mobile"}
+            </button>
+          </span>
+        </div>
+      )}
 
       {activeHole ? (
         <div className="score-entry-card">
@@ -491,6 +508,13 @@ function CardScreen({
           ))}
           {completed.length === 0 && <p>No completed holes yet.</p>}
         </div>
+      )}
+      {phoneOpen && (
+        <PhoneModal
+          team={currentTeam}
+          onSave={(phone) => { saveTeamPhone(onState, currentTeam.id, phone); notify("Captain’s number saved"); }}
+          onClose={() => setPhoneOpen(false)}
+        />
       )}
     </section>
   );
@@ -733,7 +757,7 @@ function applyOrder(
 ) {
   if (current.orders.some((item) => item.id === order.id)) return current;
   const mulligans = orderQuantity(order, "mulligan");
-  const fulfilledServerSide = order.channel === "self";
+  const fulfilledServerSide = Boolean(order.paymentRef);
   const envelopes: Envelope[] = envelopeIds.map((id) => ({
     id,
     orderId: order.id,
@@ -752,9 +776,10 @@ function applyOrder(
   }));
   // A Stripe order and its items are written server-side by the webhook. The
   // confirmation copy is display-only; pushing it from the browser could race
-  // the webhook and leave a paid order without its credits. A volunteer sale
-  // never touches the webhook, so there the device owns every pending write.
-  const clientOwnsCredit = order.channel === "volunteer";
+  // the webhook and leave a paid order without its credits. An order with no
+  // payment reference (volunteer sale or IOU tab purchase) never touches the
+  // webhook, so there the device owns every pending write.
+  const clientOwnsCredit = !order.paymentRef;
   return {
     ...current,
     orders: [...current.orders, order],
@@ -817,6 +842,82 @@ function SplitsBeneficiaryPicker({
   );
 }
 
+// Plain text on purpose: file downloads are unreliable on iOS Safari, so the
+// organiser copies this list into an email or note before leaving the course.
+function settlementText(state: AppState) {
+  const lines: string[] = [`Bulldogs Golf Day — team tabs (${EVENT.date})`, ""];
+  let grand = 0;
+  for (const team of state.teams) {
+    const orders = state.orders.filter((order) => order.teamId === team.id && !order.paymentRef);
+    if (!orders.length) continue;
+    const counts = new Map<string, { qty: number; amount: number }>();
+    let total = 0;
+    for (const order of orders) {
+      total += order.amount;
+      for (const line of order.lines) {
+        const product = PRODUCTS.find((item) => item.id === line.productId);
+        const entry = counts.get(line.productId) ?? { qty: 0, amount: 0 };
+        entry.qty += line.qty;
+        entry.amount += line.qty * (product?.price ?? 0);
+        counts.set(line.productId, entry);
+      }
+    }
+    grand += total;
+    lines.push(`Team ${team.id.replace("team-", "")} (${team.name}) — ${team.contactPhone || "no number yet"}`);
+    counts.forEach((entry, productId) => {
+      const product = PRODUCTS.find((item) => item.id === productId);
+      lines.push(`  ${entry.qty} x ${product?.name ?? productId} — $${entry.amount}`);
+    });
+    lines.push(`  Tab total: $${total}`, "");
+  }
+  lines.push(`GRAND TOTAL: $${grand}`);
+  return lines.join("\n");
+}
+
+function saveTeamPhone(
+  onState: React.Dispatch<React.SetStateAction<AppState>>,
+  teamId: string,
+  phone: string,
+) {
+  onState((current) => ({
+    ...current,
+    teams: current.teams.map((team) => team.id === teamId ? { ...team, contactPhone: phone || null } : team),
+    phoneUpdates: [
+      ...current.phoneUpdates.filter((update) => update.teamId !== teamId),
+      { id: makeId("phone"), teamId, phone },
+    ],
+  }));
+}
+
+// Deliberately no validation: a junk or skipped number is recoverable tonight,
+// a blocked sale is not. Whatever is typed gets saved.
+function PhoneModal({
+  team,
+  onSave,
+  onClose,
+}: {
+  team: Team;
+  onSave: (phone: string) => void;
+  onClose: () => void;
+}) {
+  const [phone, setPhone] = useState(team.contactPhone ?? "");
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <div className="modal" role="dialog" aria-modal="true" aria-labelledby="phone-title">
+        <button className="modal-close" onClick={onClose} aria-label="Close"><X /></button>
+        <span className="eyebrow">{team.name}</span>
+        <h2 id="phone-title">Captain’s mobile</h2>
+        <p className="modal-copy">Harry will text this number a payment link for the team tab after the round. One number per team — the captain’s.</p>
+        <label className="field-label">Mobile number
+          <input type="tel" inputMode="tel" autoComplete="tel" placeholder="720-555-0100" value={phone} onChange={(event) => setPhone(event.target.value)} autoFocus />
+        </label>
+        <button className="primary-button" onClick={() => { onSave(phone.trim()); onClose(); }}>Save number</button>
+        <button className="outline-button" onClick={onClose}>Skip for now</button>
+      </div>
+    </div>
+  );
+}
+
 function ShopScreen({
   state,
   currentTeam,
@@ -840,6 +941,8 @@ function ShopScreen({
   const [selfSplitsBeneficiary, setSelfSplitsBeneficiary] = useState("team");
   const [volunteerSplitsBeneficiary, setVolunteerSplitsBeneficiary] = useState("team");
   const [checkingOut, setCheckingOut] = useState(false);
+  const [phoneTeam, setPhoneTeam] = useState<Team | null>(null);
+  const [showSettlement, setShowSettlement] = useState(false);
   const confirmationHandled = useRef(false);
   const paymentReady = process.env.NEXT_PUBLIC_SHOP_ENABLED === "true";
   const basketKey = `bulldogs-basket-${currentTeam.id}`;
@@ -916,7 +1019,45 @@ function ShopScreen({
     setVolunteerCart((current) => ({ ...current, [product]: Math.max(0, Math.min(20, current[product] + amount)) }));
   };
 
+  const putOnTab = () => {
+    const lines = basketLines(selfCart, selfBeneficiary);
+    if (!lines.length) return;
+    const orderId = makeId("order");
+    const stamp = Date.now().toString(36).toUpperCase().slice(-6);
+    const order: Order = {
+      id: orderId,
+      teamId: currentTeam.id,
+      buyerId: currentTeam.id,
+      lines,
+      amount: selfTotal,
+      channel: "self",
+      paymentRef: null,
+      createdAt: new Date().toISOString(),
+      synced: false,
+    };
+    onState((current) => applyOrder(
+      current,
+      order,
+      Array.from({ length: selfCart.string }, (_, index) => `envelope-${orderId}-${index + 1}`),
+      Array.from({ length: selfCart.splits }, (_, index) => ({
+        id: `ticket-${orderId}-${index + 1}`,
+        number: `DB-${stamp}-${String(index + 1).padStart(2, "0")}`,
+        beneficiaryType: selfBeneficiary === "team" ? "team" as const : "player" as const,
+        beneficiaryPlayerId: selfBeneficiary === "team" ? null : selfBeneficiary,
+      })),
+    ));
+    setSelfCart(EMPTY_CART);
+    notify(`Added to Team ${currentTeam.id.replace("team-", "")}'s tab. Harry will send a payment link after the round.`);
+    // Ask for the captain's number the first time this team uses the tab. The
+    // order above is already saved — dismissing this loses nothing.
+    if (!currentTeam.contactPhone) setPhoneTeam(currentTeam);
+  };
+
   const checkout = async () => {
+    if (!PAYMENTS_ENABLED) {
+      putOnTab();
+      return;
+    }
     if (!online) {
       notify("No signal here. Try again near the clubhouse, or flag down the cart");
       return;
@@ -974,6 +1115,7 @@ function ShopScreen({
     ));
     setVolunteerCart(EMPTY_CART);
     notify(`$${volunteerTotal} sale saved`);
+    if (!PAYMENTS_ENABLED && !volunteerTeam.contactPhone) setPhoneTeam(volunteerTeam);
   };
 
   const collectEnvelope = (envelope: Envelope) => requestConfirm({
@@ -998,6 +1140,12 @@ function ShopScreen({
         <button className={mode === "self" ? "active" : ""} onClick={() => setMode("self")}><ShoppingBag /> Buy for my team</button>
         <button className={mode === "volunteer" ? "active" : ""} onClick={() => setMode("volunteer")}><BadgeDollarSign /> Volunteer sales</button>
       </div>
+      {!PAYMENTS_ENABLED && (
+        <div className="payment-setup">
+          <BadgeDollarSign />
+          <span><strong>Card payments are down today.</strong>Buy now, settle up tonight — we’ll text your captain a link.</span>
+        </div>
+      )}
       <div className="sales-total-card compact-totals">
         <div><span>Raised today</span><strong>${dayTotal.toLocaleString()}</strong></div>
         <div><span>Banana Splits pot</span><strong>${splitsTotal.toLocaleString()}</strong><small>${(splitsTotal / 2).toLocaleString()} to winner</small></div>
@@ -1044,8 +1192,8 @@ function ShopScreen({
               )}
             </div>
           )}
-          {!paymentReady && <div className="payment-setup"><LockKeyhole /><span><strong>Payments need setup</strong>Connect the club’s Stripe account before enabling checkout.</span></div>}
-          {!online && <div className="no-signal-shop"><WifiOff /><span>No signal here. Your basket stays put; try again near the clubhouse or flag down the cart.</span></div>}
+          {PAYMENTS_ENABLED && !paymentReady && <div className="payment-setup"><LockKeyhole /><span><strong>Payments need setup</strong>Connect the club’s Stripe account before enabling checkout.</span></div>}
+          {PAYMENTS_ENABLED && !online && <div className="no-signal-shop"><WifiOff /><span>No signal here. Your basket stays put; try again near the clubhouse or flag down the cart.</span></div>}
           <ProductPicker cart={selfCart} onAdjust={adjustSelf} />
           {selfCart.splits > 0 && (
             <SplitsBeneficiaryPicker team={currentTeam} value={selfBeneficiary} onChange={setSelfSplitsBeneficiary} />
@@ -1057,11 +1205,11 @@ function ShopScreen({
             <div className="shop-checkout-row">
               <div><span>Basket</span><strong>${selfTotal}</strong></div>
               <button className="primary-button" disabled={selfTotal === 0 || checkingOut} onClick={checkout}>
-                {checkingOut ? "Opening payment" : paymentReady ? `Pay $${selfTotal}` : "Payments not connected"}
+                {checkingOut ? "Opening payment" : !PAYMENTS_ENABLED ? "Put it on the tab" : paymentReady ? `Pay $${selfTotal}` : "Payments not connected"}
               </button>
             </div>
           </div>
-          <p className="shop-payment-note">Apple Pay or Google Pay when available. Card is the fallback. Stripe collects an email for the receipt.</p>
+          {PAYMENTS_ENABLED && <p className="shop-payment-note">Apple Pay or Google Pay when available. Card is the fallback. Stripe collects an email for the receipt.</p>}
         </>
       ) : (
         <>
@@ -1085,7 +1233,40 @@ function ShopScreen({
             <button className="primary-button" disabled={volunteerTotal === 0} onClick={saveVolunteerOrder}>Save ${volunteerTotal} sale</button>
             <p>String creates a collection voucher. Banana Splits numbers keep the selected beneficiary.</p>
           </div>
+          {!PAYMENTS_ENABLED && (
+            <>
+              <button className="history-toggle settlement-toggle" onClick={() => setShowSettlement((value) => !value)}>
+                <span><BadgeDollarSign size={18} /> Settlement list · organiser</span>
+                <ChevronDown className={showSettlement ? "rotated" : ""} />
+              </button>
+              {showSettlement && (
+                <div className="settlement-panel">
+                  <pre className="settlement-text">{settlementText(state)}</pre>
+                  <button
+                    className="primary-button"
+                    onClick={async () => {
+                      try {
+                        await navigator.clipboard.writeText(settlementText(state));
+                        notify("Tab list copied");
+                      } catch {
+                        notify("Copy blocked — long-press the list and copy it");
+                      }
+                    }}
+                  >
+                    Copy tab list
+                  </button>
+                </div>
+              )}
+            </>
+          )}
         </>
+      )}
+      {phoneTeam && (
+        <PhoneModal
+          team={phoneTeam}
+          onSave={(phone) => { saveTeamPhone(onState, phoneTeam.id, phone); notify("Captain’s number saved"); }}
+          onClose={() => setPhoneTeam(null)}
+        />
       )}
     </section>
   );
